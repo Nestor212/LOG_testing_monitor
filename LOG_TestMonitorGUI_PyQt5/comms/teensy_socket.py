@@ -6,6 +6,8 @@ import os
 import csv
 from PyQt5.QtCore import QThread
 from comms.parser_emitter import ParserEmitter
+from Database.db import get_connection  # Ensure this is at the top of your file
+
 
 
 class TeensySocketThread(QThread):
@@ -129,21 +131,24 @@ class TeensySocketThread(QThread):
                 return
 
             raw_ts = float(fields[0])
-            timestamp = datetime.datetime.fromtimestamp(raw_ts).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            timestamp = datetime.datetime.fromtimestamp(raw_ts)
+            # print(timestamp, flush=True)
+            timestamp_str = timestamp.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
             loads = list(map(float, fields[1:7]))
             accel_on = int(fields[7])
             accel_stale = fields[11] == '1'
             accels = list(map(float, fields[8:11])) if accel_on and not accel_stale else []
 
-            self.load_buffer.append([timestamp] + loads)
+            self.load_buffer.append((timestamp, *loads))
+
             if accels:
                 adjusted_accels = [a - offset for a, offset in zip(accels, self.accel_offset)]
                 self.last_valid_accels = adjusted_accels
-                self.accel_buffer.append([timestamp] + adjusted_accels)
+                self.accel_buffer.append([timestamp_str] + adjusted_accels)
 
             adjusted_loads = [l - offset - zero_load for l, offset, zero_load in zip(loads, self.load_offsets, self.lc_zero_load_offset)]
 
-            self.latest_data = (timestamp, adjusted_loads, self.last_valid_accels, accel_on, accel_stale)
+            self.latest_data = (timestamp_str, adjusted_loads, self.last_valid_accels, accel_on, accel_stale)
 
             # --- SPS counter ---
             current_sec = int(raw_ts)
@@ -166,51 +171,102 @@ class TeensySocketThread(QThread):
             print(f"⚠️ Parse error: {e} — line: {line}", flush=True)
 
     def flush_logs(self):
-        now = time.time()
+        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        conn = get_connection()
+        cursor = conn.cursor()
 
         if self.zero_pending["loads"]:
-            log_path = os.path.join(self.data_dir, "load_cell_zero_offsets.csv")
-            with open(log_path, 'a', newline='') as f:
-                writer = csv.writer(f)
-                writer.writerow(["Timestamp"] + [f"LC{i+1} Offset" for i in range(6)])
-                writer.writerow([datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]] + self.load_offsets)
+            cursor.execute("""
+                INSERT INTO load_cell_zero_offsets (
+                    timestamp, lc1_offset, lc2_offset, lc3_offset, lc4_offset, lc5_offset, lc6_offset
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, [now_str] + self.load_offsets)
             self.zero_pending["loads"] = False
 
         if self.zero_pending["accels"]:
-            log_path = os.path.join(self.data_dir, "accelerometer_zero_offsets.csv")
-            with open(log_path, 'a', newline='') as f:
-                writer = csv.writer(f)
-                writer.writerow(["Timestamp", "AX Offset", "AY Offset", "AZ Offset"])
-                writer.writerow([datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]] + self.accel_offset)
+            cursor.execute("""
+                INSERT INTO accelerometer_zero_offsets (
+                    timestamp, ax_offset, ay_offset, az_offset
+                ) VALUES (?, ?, ?, ?)
+            """, [now_str] + self.accel_offset)
             self.zero_pending["accels"] = False
 
-        if now - self.last_flush < 2.0:
+        conn.commit()
+        conn.close()
+
+        now = time.time()
+        if now - self.last_flush < 0.1:
             return
         self.last_flush = now
 
-        if self.load_buffer:
-            log_date = datetime.datetime.now().strftime("%Y-%m-%d")
-            log_path = os.path.join(self.data_dir, f"load_cell_log_{log_date}.csv")
-            file_exists = os.path.isfile(log_path)
+        if self.load_buffer or self.accel_buffer:
+            conn = get_connection()
+            cursor = conn.cursor()
 
-            with open(log_path, 'a', newline='') as f:
-                writer = csv.writer(f)
-                if not file_exists:
-                    writer.writerow(["Timestamp"] + [f"LC{i+1}" for i in range(6)])
-                writer.writerows(self.load_buffer)
-            self.load_buffer.clear()
+            if self.load_buffer:
+                cursor.executemany("""
+                    INSERT INTO load_cells (timestamp, lc1, lc2, lc3, lc4, lc5, lc6)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, self.load_buffer)
+                self.load_buffer.clear()
 
-        if self.accel_buffer:
-            log_date = datetime.datetime.now().strftime("%Y-%m-%d")
-            log_path = os.path.join(self.data_dir, f"accelerometer_log_{log_date}.csv")
-            file_exists = os.path.isfile(log_path)
+            if self.accel_buffer:
+                cursor.executemany("""
+                    INSERT INTO accelerometer (timestamp, ax, ay, az)
+                    VALUES (?, ?, ?, ?)
+                """, self.accel_buffer)
+                self.accel_buffer.clear()
 
-            with open(log_path, 'a', newline='') as f:
-                writer = csv.writer(f)
-                if not file_exists:
-                    writer.writerow(["Timestamp", "AX", "AY", "AZ"])
-                writer.writerows(self.accel_buffer)
-            self.accel_buffer.clear()
+            conn.commit()
+            conn.close()
+
+
+    # def flush_logs(self):
+    #     now = time.time()
+
+    #     if self.zero_pending["loads"]:
+    #         log_path = os.path.join(self.data_dir, "load_cell_zero_offsets.csv")
+    #         with open(log_path, 'a', newline='') as f:
+    #             writer = csv.writer(f)
+    #             writer.writerow(["Timestamp"] + [f"LC{i+1} Offset" for i in range(6)])
+    #             writer.writerow([datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]] + self.load_offsets)
+    #         self.zero_pending["loads"] = False
+
+    #     if self.zero_pending["accels"]:
+    #         log_path = os.path.join(self.data_dir, "accelerometer_zero_offsets.csv")
+    #         with open(log_path, 'a', newline='') as f:
+    #             writer = csv.writer(f)
+    #             writer.writerow(["Timestamp", "AX Offset", "AY Offset", "AZ Offset"])
+    #             writer.writerow([datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]] + self.accel_offset)
+    #         self.zero_pending["accels"] = False
+
+    #     if now - self.last_flush < 2.0:
+    #         return
+    #     self.last_flush = now
+
+    #     if self.load_buffer:
+    #         log_date = datetime.datetime.now().strftime("%Y-%m-%d")
+    #         log_path = os.path.join(self.data_dir, f"load_cell_log_{log_date}.csv")
+    #         file_exists = os.path.isfile(log_path)
+
+    #         with open(log_path, 'a', newline='') as f:
+    #             writer = csv.writer(f)
+    #             if not file_exists:
+    #                 writer.writerow(["Timestamp"] + [f"LC{i+1}" for i in range(6)])
+    #             writer.writerows(self.load_buffer)
+    #         self.load_buffer.clear()
+
+    #     if self.accel_buffer:
+    #         log_date = datetime.datetime.now().strftime("%Y-%m-%d")
+    #         log_path = os.path.join(self.data_dir, f"accelerometer_log_{log_date}.csv")
+    #         file_exists = os.path.isfile(log_path)
+
+    #         with open(log_path, 'a', newline='') as f:
+    #             writer = csv.writer(f)
+    #             if not file_exists:
+    #                 writer.writerow(["Timestamp", "AX", "AY", "AZ"])
+    #             writer.writerows(self.accel_buffer)
+    #         self.accel_buffer.clear()
 
     def sync_time(self):
         if self.s:

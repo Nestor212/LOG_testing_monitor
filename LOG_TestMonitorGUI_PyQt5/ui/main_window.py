@@ -7,6 +7,7 @@ from PyQt5.QtGui import QFont, QColor, QPalette
 from comms.teensy_socket import TeensySocketThread
 from comms.parser_emitter import ParserEmitter
 from PyQt5.QtCore import QTimer, QTime
+from ui.plotter import PlotWindow
 import csv
 import os
 import datetime
@@ -25,6 +26,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Force Display — Teensy Monitor")
         self.setGeometry(100, 100, 800, 550)
+        self.plot_window = PlotWindow()
 
         self.socket_thread = None
         self.signal_emitter = ParserEmitter()
@@ -141,9 +143,13 @@ class MainWindow(QMainWindow):
         self.zero_accel_btn = QPushButton("Zero Accels")
         self.zero_accel_btn.clicked.connect(self.zero_accels)
 
+        self.plot_btn = QPushButton("Open Plotter")
+        self.plot_btn.clicked.connect(self.show_plot_window)
+
         zero_layout = QHBoxLayout()
         zero_layout.addWidget(self.zero_lc_btn)
         zero_layout.addWidget(self.zero_accel_btn)
+        zero_layout.addWidget(self.plot_btn)
 
         legend = QLabel("Arrows indicate direction of applied force.\n X: ←→ , Y: ↑↓ , Z: ▼ (down) ▲ (up)")
         legend.setAlignment(Qt.AlignCenter)
@@ -163,10 +169,14 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(container)
 
         log_file = f"lc_sps_log_{datetime.date.today().isoformat()}.csv"
-        self.sps_log_path = os.path.join(os.path.expanduser("~/Desktop/LOG_TestMonitorGUI_PyQt5/Database"), log_file)
-        with open(self.sps_log_path, 'w', newline='') as f:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        self.sps_log_path = os.path.join(base_dir, "..", "Database", log_file)
+        with open(self.sps_log_path, 'a', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(["Timestamp", "LC_SPS", "Accel_SPS"])
+
+    def show_plot_window(self):
+        self.plot_window.show()
 
     def zero_loads(self):
         if self.socket_thread:
