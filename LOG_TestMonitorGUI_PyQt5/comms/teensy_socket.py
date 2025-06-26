@@ -139,7 +139,6 @@ class TeensySocketThread(QThread):
             accel_stale = fields[11] == '1'
             accels = list(map(float, fields[8:11])) if accel_on and not accel_stale else []
 
-            self.load_buffer.append((timestamp, *loads))
 
             if accels:
                 adjusted_accels = [a - offset for a, offset in zip(accels, self.accel_offset)]
@@ -147,6 +146,8 @@ class TeensySocketThread(QThread):
                 self.accel_buffer.append([timestamp_str] + adjusted_accels)
 
             adjusted_loads = [l - offset - zero_load for l, offset, zero_load in zip(loads, self.load_offsets, self.lc_zero_load_offset)]
+            
+            self.load_buffer.append((timestamp, *adjusted_loads))
 
             self.latest_data = (timestamp_str, adjusted_loads, self.last_valid_accels, accel_on, accel_stale)
 
