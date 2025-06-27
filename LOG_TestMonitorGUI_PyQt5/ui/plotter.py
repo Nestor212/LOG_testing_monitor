@@ -1,19 +1,41 @@
+# y = 8
+# -----------------------------------
+# | lc5                         lc1 |
+# |  z                           z  |
+# |              lc6                |
+# |               x                  |
+# |                                 |
+# |                                 |
+# |                                 |
+# | lc4           lc3           lc2 |
+# |  y             z             y  |
+# -----------------------------------
+# x = 0                         x = 16
+# y = 0
+
+
+import collections
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QCheckBox, QComboBox, QDateTimeEdit
+    QCheckBox, QComboBox, QDateTimeEdit, QDialog
 )
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
-from matplotlib.figure import Figure
 from PyQt5.QtCore import QDateTime, QTimer, QThread
 
-import matplotlib.dates as mdates
-import collections
+from matplotlib.figure import Figure
+import matplotlib.gridspec as gridspec
+from matplotlib.backends.backend_qt5agg import (
+    FigureCanvasQTAgg as FigureCanvas,
+    NavigationToolbar2QT as NavigationToolbar
+)
 
 from ui.sql_worker import SqlWorker
 
-USE_SUBPLOTS = True  # Set to False to use one shared plot
 
+USE_SUBPLOTS = True  # Set to False to use one shared plot
 
 class PlotWindow(QWidget):
     def __init__(self):
@@ -103,6 +125,9 @@ class PlotWindow(QWidget):
         self.plot_button = QPushButton("Plot")
         self.plot_button.clicked.connect(self.plot_historical)
 
+        self.moment_map_button = QPushButton("Moment Map")
+        self.moment_map_button.clicked.connect(self.toggle_moment_map_window)
+
         hist_control_layout = QHBoxLayout()
         hist_control_layout.addWidget(QLabel("Start:"))
         hist_control_layout.addWidget(self.start_time_edit)
@@ -111,6 +136,7 @@ class PlotWindow(QWidget):
         hist_control_layout.addWidget(QLabel("Average:"))
         hist_control_layout.addWidget(self.averaging_selector)
         hist_control_layout.addWidget(self.plot_button)
+        hist_control_layout.addWidget(self.moment_map_button)
         hist_control_layout.addStretch()
 
         layout = QVBoxLayout()
@@ -121,6 +147,17 @@ class PlotWindow(QWidget):
         self.setLayout(layout)
 
         self.toggle_live_mode(self.live_mode)
+
+        self.moment_widget = None
+        # self.moment_widget.show()
+
+    def toggle_moment_map_window(self):
+        if not hasattr(self, "moment_widget") or self.moment_widget is None:
+            self.moment_widget = MomentMapWidget()
+        self.moment_widget.resize(1000, 500)
+        self.moment_widget.show()
+        self.moment_widget.raise_()
+        self.moment_widget.activateWindow()
 
     def toggle_live_mode(self, checked):
         self.live_mode = checked
@@ -146,7 +183,6 @@ class PlotWindow(QWidget):
         self.live_window_minutes = mapping.get(text, 10)
         self.max_live_points = self.live_window_minutes * 60 * 4  # 4 Hz
 
-
     def toggle_live_plotting(self):
         if self.live_timer.isActive():
             self.live_timer.stop()
@@ -168,6 +204,12 @@ class PlotWindow(QWidget):
         self.x_data.append(dt)
         for i in range(6):
             self.y_data[i].append(values[i])
+
+        if self.moment_widget:
+            fx_vals = [self.y_data[5][-1]] if self.y_data[5] else [0]
+            fy_vals = [self.y_data[1][-1], self.y_data[3][-1]] if self.y_data[1] and self.y_data[3] else [0, 0]
+            fz_vals = [self.y_data[0][-1], self.y_data[2][-1], self.y_data[4][-1]] if self.y_data[0] and self.y_data[2] and self.y_data[4] else [0, 0, 0]
+            self.moment_widget.update_forces(fx_vals, fy_vals, fz_vals)
 
         # Trim to max visible live window
         while len(self.x_data) > self.max_live_points:
@@ -225,9 +267,184 @@ class PlotWindow(QWidget):
             y_vals = [self.y_data[i][nearest_index] for i in range(6)]
             print(f"Clicked near: {self.x_data[nearest_index]} -> {y_vals}")
 
+    # def show_moment_map(self):
+    #     import numpy as np
+
+    #     # Prepare data as before
+    #     pos_fx = np.array([[8, 6]])
+    #     pos_fy = np.array([[1, 1], [16, 1]])
+    #     pos_fz = np.array([[1, 8], [8, 1], [16, 8]])
+
+    #     fx_vals = [self.y_data[5][-1]] if self.y_data[5] else [0]
+    #     fy_vals = [self.y_data[1][-1], self.y_data[3][-1]] if self.y_data[1] and self.y_data[3] else [0, 0]
+    #     fz_vals = [self.y_data[0][-1], self.y_data[2][-1], self.y_data[4][-1]] if self.y_data[0] and self.y_data[2] and self.y_data[4] else [0, 0, 0]
+
+    #     x = np.linspace(0, 17, 30)
+    #     y = np.linspace(0, 9, 20)
+    #     X, Y = np.meshgrid(x, y)
+
+    #     Tau_x = np.zeros_like(X)
+    #     Tau_y = np.zeros_like(Y)
+    #     Tau_z = np.zeros_like(X)
+    #     U = np.zeros_like(X)
+    #     V = np.zeros_like(Y)
+
+    #     for (px, py), fz in zip(pos_fz, fz_vals):
+    #         dx = Y - py
+    #         dy = X - px
+    #         Tau_x += dx * fz
+    #         Tau_y -= dy * fz
+
+    #     for (px, py), fx in zip(pos_fx, fx_vals):
+    #         Tau_z += -(Y - py) * fx
+    #         U += fx
+    #     for (px, py), fy in zip(pos_fy, fy_vals):
+    #         Tau_z += (X - px) * fy
+    #         V += fy
+
+    #     # --- Create a dialog window ---
+    #     dialog = QDialog(self)
+    #     dialog.setWindowTitle("Moment Map")
+    #     layout = QVBoxLayout(dialog)
+    #     fig = Figure(figsize=(10, 4))
+    #     canvas = FigureCanvas(fig)
+    #     layout.addWidget(canvas)
+
+    #     axs = fig.subplots(1, 3)
+    #     c1 = axs[0].contourf(X, Y, Tau_x, cmap='coolwarm')
+    #     axs[0].set_title("Torque around X (pitch)")
+    #     fig.colorbar(c1, ax=axs[0])
+
+    #     c2 = axs[1].contourf(X, Y, Tau_y, cmap='coolwarm')
+    #     axs[1].set_title("Torque around Y (roll)")
+    #     fig.colorbar(c2, ax=axs[1])
+
+    #     c3 = axs[2].contourf(X, Y, Tau_z, cmap='coolwarm')
+    #     axs[2].quiver(X, Y, U, V, scale=50, color='k', alpha=0.7)
+    #     axs[2].set_title("Torque Z + Lateral Forces")
+    #     fig.colorbar(c3, ax=axs[2])
+
+    #     for ax in axs:
+    #         ax.set_xlabel("X")
+    #         ax.set_ylabel("Y")
+    #         ax.set_aspect("equal")
+
+    #     canvas.draw()
+    #     dialog.exec_()
 
     def closeEvent(self, event):
         self.live_timer.stop()
         self.worker_thread.quit()
         self.worker_thread.wait()
         event.accept()
+
+class MomentMapWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Live Moment Map")
+        self.resize(1000, 500)
+
+        layout = QVBoxLayout(self)
+        self.fig = Figure(figsize=(10, 4))
+        self.canvas = FigureCanvas(self.fig)
+        layout.addWidget(self.canvas)
+
+        self.info_label = QLabel("Torque and force info here")
+        layout.addWidget(self.info_label)
+
+        gs = gridspec.GridSpec(2, 2, figure=self.fig, height_ratios=[0.05, 1])
+        self.axs = [
+            self.fig.add_subplot(gs[1, 0]),
+            self.fig.add_subplot(gs[1, 1])
+        ]
+        self.cbar_axes = [
+            self.fig.add_subplot(gs[0, 0]),
+            self.fig.add_subplot(gs[0, 1])
+        ]
+
+        self.X, self.Y = np.meshgrid(np.linspace(0, 17, 30), np.linspace(0, 9, 20))
+        self.Tau_x = np.zeros_like(self.X)
+        self.Tau_y = np.zeros_like(self.X)
+        self.Tau_z = np.zeros_like(self.X)
+        self.U = np.zeros_like(self.X)
+        self.V = np.zeros_like(self.Y)
+
+        for ax in self.axs:
+            ax.set_xlabel("X")
+            ax.set_ylabel("Y")
+            ax.set_aspect("equal")
+
+        self.canvas.draw()
+
+    def update_forces(self, fx_vals, fy_vals, fz_vals):
+        pos_fx = np.array([[8, 6]]) # LC6
+        pos_fy = np.array([[1, 1], [16, 1]]) # LC2, LC4 respectively
+        pos_fz = np.array([[16, 8], [8, 1], [1, 8]]) #LC1, LC3, LC5 respectively
+
+        self.Tau_x.fill(0)
+        self.Tau_y.fill(0)
+        self.Tau_z.fill(0)
+        self.U.fill(0)
+        self.V.fill(0)
+
+        fx_vals = np.nan_to_num(fx_vals)
+        fy_vals = np.nan_to_num(fy_vals)
+        fz_vals = np.nan_to_num(fz_vals)
+
+        for (px, py), fz in zip(pos_fz, fz_vals):
+            dx = self.Y - py
+            dy = self.X - px
+            self.Tau_x += dx * fz
+            self.Tau_y -= dy * fz
+
+        for (px, py), fx in zip(pos_fx, fx_vals):
+            self.Tau_z += -(self.Y - py) * fx
+            self.U += fx
+
+        for (px, py), fy in zip(pos_fy, fy_vals):
+            self.Tau_z += (self.X - px) * fy
+            self.V += fy
+
+        for ax in self.axs:
+            ax.clear()
+
+        # τ_x and τ_y vector magnitude
+        tau_mag = np.sqrt(self.Tau_x**2 + self.Tau_y**2)
+        im1 = self.axs[0].contourf(self.X, self.Y, tau_mag, cmap='coolwarm')
+        self.axs[0].quiver(self.X, self.Y, self.Tau_y, self.Tau_x, scale=100, color='black', alpha=0.1)
+        self.axs[0].set_title("Torque X/Y Magnitude + Direction")
+
+        im2 = self.axs[1].contourf(self.X, self.Y, self.Tau_z, cmap='coolwarm')
+        self.axs[1].quiver(self.X, self.Y, self.U, self.V, scale=50, color='k', alpha=0.1)
+        self.axs[1].set_title("Torque Z + Lateral Forces")
+
+        self.fig.colorbar(im1, cax=self.cbar_axes[0], orientation='horizontal')
+        self.fig.colorbar(im2, cax=self.cbar_axes[1], orientation='horizontal')
+
+        for ax in self.axs:
+            ax.set_xlabel("X")
+            ax.set_ylabel("Y")
+            ax.set_aspect("equal")
+
+        self.canvas.draw()
+
+        # Net forces
+        Fz_total = sum(fz_vals)
+        Fx_total = sum(fx_vals)
+        Fy_total = sum(fy_vals)
+
+        # Torques around X and Y from Fz
+        tau_x_total = sum((y - 4.5) * fz for (x, y), fz in zip(pos_fz, fz_vals))  # Center at Y=4.5
+        tau_y_total = -sum((x - 8.5) * fz for (x, y), fz in zip(pos_fz, fz_vals)) # Center at X=8.5
+
+        # Torque around Z from XY
+        tau_z_total = sum(
+            x * fy - y * fx
+            for (x, y), fx, fy in zip([*pos_fx, *pos_fy], fx_vals + [0], [0] + fy_vals)
+        )
+
+        info = (
+            f"Net Forces — Fx: {Fx_total:.2f}  Fy: {Fy_total:.2f}  Fz: {Fz_total:.2f}\n"
+            f"Net Torques — τx: {tau_x_total:.2f}  τy: {tau_y_total:.2f}  τz: {tau_z_total:.2f}"
+        )
+        self.info_label.setText(info)
