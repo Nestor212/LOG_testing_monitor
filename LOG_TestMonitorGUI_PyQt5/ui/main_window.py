@@ -8,6 +8,7 @@ from comms.teensy_socket import TeensySocketThread
 from comms.parser_emitter import ParserEmitter
 from PyQt5.QtCore import QTimer, QTime
 from ui.plotter import PlotWindow
+from ui.moment_map import MomentMapWidget
 import csv
 import os
 import datetime
@@ -26,7 +27,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Force Display — Teensy Monitor")
         self.setGeometry(100, 100, 800, 550)
+
         self.plot_window = PlotWindow()
+        self.moment_map_window = MomentMapWidget()
 
         self.socket_thread = None
         self.signal_emitter = ParserEmitter()
@@ -146,10 +149,14 @@ class MainWindow(QMainWindow):
         self.plot_btn = QPushButton("Open Plotter")
         self.plot_btn.clicked.connect(self.show_plot_window)
 
-        zero_layout = QHBoxLayout()
-        zero_layout.addWidget(self.zero_lc_btn)
-        zero_layout.addWidget(self.zero_accel_btn)
-        zero_layout.addWidget(self.plot_btn)
+        self.moment_map_btn = QPushButton("Open Moment Map")
+        self.moment_map_btn.clicked.connect(self.show_moment_map_window)
+
+        zero_grid = QGridLayout()
+        zero_grid.addWidget(self.zero_lc_btn, 0, 0)
+        zero_grid.addWidget(self.zero_accel_btn, 0, 1)
+        zero_grid.addWidget(self.plot_btn, 1, 0)
+        zero_grid.addWidget(self.moment_map_btn, 1, 1)
 
         legend = QLabel("Arrows indicate direction of applied force.\n X: ←→ , Y: ↑↓ , Z: ▼ (down) ▲ (up)")
         legend.setAlignment(Qt.AlignCenter)
@@ -162,7 +169,7 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(legend)
         main_layout.addLayout(accel_header_layout)
         main_layout.addLayout(accel_grid)
-        main_layout.addLayout(zero_layout)
+        main_layout.addLayout(zero_grid)
 
         container = QWidget()
         container.setLayout(main_layout)
@@ -174,6 +181,11 @@ class MainWindow(QMainWindow):
         with open(self.sps_log_path, 'a', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(["Timestamp", "LC_SPS", "Accel_SPS"])
+
+    def show_moment_map_window(self):
+        self.moment_map_window.show()
+        self.moment_map_window.raise_()
+        self.moment_map_window.activateWindow()
 
     def show_plot_window(self):
         self.plot_window.show()
@@ -218,7 +230,6 @@ class MainWindow(QMainWindow):
         self.accel_led.setAutoFillBackground(True)
         self.accel_led.setPalette(palette)
 
-
     def update_display(self, timestamp, loads, accels, accel_on, accel_status):
         axis_map = {
             "LC1": "Z", "LC2": "Y", "LC3": "Z",
@@ -243,6 +254,12 @@ class MainWindow(QMainWindow):
                 self.accel_title.setText("Acceleration (Unavailable)")
                 for axis in ["X", "Y", "Z"]:
                     self.accel_labels[axis].setText(f"{axis}: ---")
+
+        # Update moment map
+        fx_vals = [loads[5]]
+        fy_vals = [loads[1], loads[3]]
+        fz_vals = [loads[0], loads[2], loads[4]]
+        self.moment_map_window.update_forces(fx_vals, fy_vals, fz_vals)
 
     def update_sps_display(self, lc_sps, accel_sps):
         self.lc_sps_label.setText(f"LC SPS: {lc_sps}")

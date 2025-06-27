@@ -20,7 +20,7 @@ class TeensySocketThread(QThread):
         self.emitter = emitter
         self.last_emit_time = time.time()
         self.latest_data = None
-        self.emit_interval = 0.2  # 20 Hz
+        self.emit_interval = 0.25  # 20 Hz
 
         base_dir = os.path.dirname(os.path.abspath(__file__))
         self.data_dir = os.path.join(base_dir, "..", "Database", "Data")
@@ -146,7 +146,7 @@ class TeensySocketThread(QThread):
                 self.accel_buffer.append([timestamp_str] + adjusted_accels)
 
             adjusted_loads = [l - offset - zero_load for l, offset, zero_load in zip(loads, self.load_offsets, self.lc_zero_load_offset)]
-            
+
             self.load_buffer.append((timestamp, *adjusted_loads))
 
             self.latest_data = (timestamp_str, adjusted_loads, self.last_valid_accels, accel_on, accel_stale)
