@@ -7,3 +7,4 @@ __pycache__/
 *.csv
 /Database/Data/data_log.db
 /Database/ExportedData/
+LOG_TestMonitorGUI_PyQt5/Database/Data/data_log.db
