@@ -13,10 +13,10 @@ a specified time window.
 
 USAGE:
   # Export all data from a single date (00:00:00 to 23:59:59 on 2025-06-26)
-  python export_data.py 2025-06-26
+  python3 export_data.py 2025-06-26
 
   # Export data from a custom date/time range
-  python export_data.py "2025-06-25 08:00:00" "2025-06-25 14:30:00"
+  python3 export_data.py "2025-06-27 16:00:00" "2025-06-27 16:10:00"
 
 Output CSV files will be saved in the current directory with filenames indicating
 the selected date/time range.

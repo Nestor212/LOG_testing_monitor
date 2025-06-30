@@ -7,8 +7,10 @@ import csv
 from PyQt5.QtCore import QThread
 from comms.parser_emitter import ParserEmitter
 from Database.db import get_connection  # Ensure this is at the top of your file
+from queue import Queue
+import threading
 
-
+os.makedirs("./Database/Data", exist_ok=True)
 
 class TeensySocketThread(QThread):
     def __init__(self, host, port, emitter: ParserEmitter):
@@ -36,6 +38,11 @@ class TeensySocketThread(QThread):
         self.accel_offset = [0.0, 0.0, 0.0]
         self.zero_pending = {"loads": True, "accels": True}
 
+        self.db_queue = Queue()
+        self._db_writer_thread = threading.Thread(target=self._db_writer_loop, daemon=True)
+        self._db_writer_thread.start()
+
+
     def zero_loads(self):
         if self.latest_data:
             _, loads, *_ = self.latest_data
@@ -50,7 +57,6 @@ class TeensySocketThread(QThread):
                 self.accel_offset = accels[:]
                 self.zero_pending["accels"] = True
                 print(f"🔧 Zeroed accelerometer: {self.accel_offset}")
-
 
     def emit_loop(self):
         while self.running:
@@ -126,6 +132,7 @@ class TeensySocketThread(QThread):
 
     def handle_line(self, line):
         try:
+            # print(f"📥 Received line: {line}", flush=True)
             fields = line[3:].strip().split()
             if len(fields) != 12:
                 return
@@ -146,6 +153,7 @@ class TeensySocketThread(QThread):
                 self.accel_buffer.append([timestamp_str] + adjusted_accels)
 
             adjusted_loads = [l - offset - zero_load for l, offset, zero_load in zip(loads, self.load_offsets, self.lc_zero_load_offset)]
+            # print(f"Adjusted loads: {adjusted_loads}", flush=True)
 
             self.load_buffer.append((timestamp, *adjusted_loads))
 
@@ -170,59 +178,89 @@ class TeensySocketThread(QThread):
 
         except Exception as e:
             print(f"⚠️ Parse error: {e} — line: {line}", flush=True)
+    
+    def _db_writer_loop(self):
+        # Open CSV files once for appending
+        lc_log_path = os.path.join(self.data_dir, "load_buffer_log.csv.csv")
+        accel_log_path = os.path.join(self.data_dir, "accel_buffer_log.csv")
+
+        with open(lc_log_path, "a", newline="") as load_csv_file, \
+            open(accel_log_path, "a", newline="") as accel_csv_file:
+            load_writer = csv.writer(load_csv_file)
+            accel_writer = csv.writer(accel_csv_file)
+
+            while True:
+                payload = self.db_queue.get()
+                if payload is None:
+                    break  # For clean shutdown
+
+                try:
+                    conn = get_connection()
+                    cursor = conn.cursor()
+
+                    now_str = payload["timestamp"]
+
+                    if payload["zero_pending"]["loads"]:
+                        cursor.execute("""
+                            INSERT INTO load_cell_zero_offsets (
+                                timestamp, lc1_offset, lc2_offset, lc3_offset, lc4_offset, lc5_offset, lc6_offset
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """, [now_str] + payload["load_offsets"])
+
+                    if payload["zero_pending"]["accels"]:
+                        cursor.execute("""
+                            INSERT INTO accelerometer_zero_offsets (
+                                timestamp, ax_offset, ay_offset, az_offset
+                            ) VALUES (?, ?, ?, ?)
+                        """, [now_str] + payload["accel_offset"])
+
+                    if payload["load_buffer"]:
+                        cursor.executemany("""
+                            INSERT INTO load_cells (timestamp, lc1, lc2, lc3, lc4, lc5, lc6)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """, payload["load_buffer"])
+
+                        # Write to CSV
+                        for row in payload["load_buffer"]:
+                            load_writer.writerow(row)
+
+                    if payload["accel_buffer"]:
+                        cursor.executemany("""
+                            INSERT INTO accelerometer (timestamp, ax, ay, az)
+                            VALUES (?, ?, ?, ?)
+                        """, payload["accel_buffer"])
+
+                        # Write to CSV
+                        for row in payload["accel_buffer"]:
+                            accel_writer.writerow(row)
+
+                    conn.commit()
+                    conn.close()
+                except Exception as e:
+                    print(f"⚠️ DB writer error: {e}")
+                finally:
+                    self.db_queue.task_done()
+
 
     def flush_logs(self):
         now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-        conn = get_connection()
-        cursor = conn.cursor()
 
-        if self.zero_pending["loads"]:
-            cursor.execute("""
-                INSERT INTO load_cell_zero_offsets (
-                    timestamp, lc1_offset, lc2_offset, lc3_offset, lc4_offset, lc5_offset, lc6_offset
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, [now_str] + self.load_offsets)
-            self.zero_pending["loads"] = False
+        payload = {
+            "zero_pending": self.zero_pending.copy(),
+            "load_offsets": self.load_offsets.copy(),
+            "accel_offset": self.accel_offset.copy(),
+            "load_buffer": self.load_buffer.copy(),
+            "accel_buffer": self.accel_buffer.copy(),
+            "timestamp": now_str
+        }
 
-        if self.zero_pending["accels"]:
-            cursor.execute("""
-                INSERT INTO accelerometer_zero_offsets (
-                    timestamp, ax_offset, ay_offset, az_offset
-                ) VALUES (?, ?, ?, ?)
-            """, [now_str] + self.accel_offset)
-            self.zero_pending["accels"] = False
+        self.zero_pending = {"loads": False, "accels": False}
+        self.load_buffer.clear()
+        self.accel_buffer.clear()
 
-        conn.commit()
-        conn.close()
+        self.db_queue.put(payload)
 
-        now = time.time()
-        if now - self.last_flush < 0.1:
-            return
-        self.last_flush = now
-
-        if self.load_buffer or self.accel_buffer:
-            conn = get_connection()
-            cursor = conn.cursor()
-
-            if self.load_buffer:
-                cursor.executemany("""
-                    INSERT INTO load_cells (timestamp, lc1, lc2, lc3, lc4, lc5, lc6)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, self.load_buffer)
-                self.load_buffer.clear()
-
-            if self.accel_buffer:
-                cursor.executemany("""
-                    INSERT INTO accelerometer (timestamp, ax, ay, az)
-                    VALUES (?, ?, ?, ?)
-                """, self.accel_buffer)
-                self.accel_buffer.clear()
-
-            conn.commit()
-            conn.close()
-
-
-    # def flush_logs(self):
+    # def flush_csv_logs(self):
     #     now = time.time()
 
     #     if self.zero_pending["loads"]:

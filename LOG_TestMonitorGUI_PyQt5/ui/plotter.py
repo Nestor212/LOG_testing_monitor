@@ -78,8 +78,8 @@ class PlotWindow(QWidget):
 
         self.live_mode = True
         self.live_window_minutes = 1
-        self.live_avg_n = 50
-        self.max_live_points = self.live_window_minutes * 60 * 4  # live window at 4 Hz
+        self.live_avg_n = 30
+        self.max_live_points = self.live_window_minutes * 60 * 2  # live window at 2 Hz
 
         # Worker Thread
         self.worker_thread = QThread()
@@ -120,7 +120,7 @@ class PlotWindow(QWidget):
 
         self.averaging_selector = QComboBox()
         self.averaging_selector.addItems([
-            "1 (100 Hz)", "2", "5", "10", "20", "25", "50", "100"
+            "1 (60 Hz)", "2 (30 Hz)", "5 (12 Hz)", "10 (6 Hz)", "20 (3 Hz)", "30 (2 Hz)", "60 (1 Hz)"
         ])
 
         self.plot_button = QPushButton("Plot")
@@ -332,10 +332,19 @@ class PlotWindow(QWidget):
     #     canvas.draw()
     #     dialog.exec_()
 
+    def hideEvent(self, event):
+        print("[PlotWindow] Window hidden — live timer paused.")
+        if self.live_timer.isActive():
+            self.live_timer.stop()
+            self.start_btn.setText("Start")
+            self.live_checkbox.setEnabled(True)
+            self.window_selector.setEnabled(True)
+        event.accept()
+
     def closeEvent(self, event):
-        self.live_timer.stop()
+        print("[PlotWindow] Window closed — stopping worker thread and live timer.")
+        if self.live_timer.isActive():
+            self.live_timer.stop()
         self.worker_thread.quit()
         self.worker_thread.wait()
         event.accept()
-
-

@@ -1,10 +1,22 @@
+# Python cache and compiled files
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+
+# macOS and generic clutter
 .DS_Store
+
+# Logs and data files
 *.log
 *.csv
-/Database/Data/data_log.db
-/Database/ExportedData/
-LOG_TestMonitorGUI_PyQt5/Database/Data/data_log.db
+
+# Ignore entire Database/Data directory and its contents
+Database/Data/
+
+# Ignore ExportedData
+Database/ExportedData/
+
+# (Redundancy if you want to be explicit)
+# Ignore data_log.db anywhere
+**/data_log.db

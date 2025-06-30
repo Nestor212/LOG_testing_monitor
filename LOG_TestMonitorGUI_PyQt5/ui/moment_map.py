@@ -48,15 +48,33 @@ class MomentMapWidget(QWidget):
             ax.set_ylabel("Y")
             ax.set_aspect("equal")
 
-        # Initial dummy contours
-        self.im1 = self.axs[0].contourf(self.X, self.Y, np.zeros_like(self.X),
-                                        levels=np.linspace(0, 10, 20), cmap='coolwarm')
-        self.im2 = self.axs[1].contourf(self.X, self.Y, np.zeros_like(self.X),
-                                        levels=np.linspace(-10, 10, 20), cmap='coolwarm')
+        self.levels_xy = np.linspace(0, 10, 20)
+        self.levels_z = np.linspace(-10, 10, 20)
+
+        self.im1 = self.axs[0].contourf(self.X, self.Y, np.zeros_like(self.X), levels=self.levels_xy, cmap='coolwarm')
+        self.im2 = self.axs[1].contourf(self.X, self.Y, np.zeros_like(self.X), levels=self.levels_z, cmap='coolwarm')
 
         self.cbar1 = self.fig.colorbar(self.im1, cax=self.cbar_axes[0], orientation='horizontal')
         self.cbar2 = self.fig.colorbar(self.im2, cax=self.cbar_axes[1], orientation='horizontal')
         self._style_colorbars()
+
+        self.quiv1 = self.axs[0].quiver(self.X, self.Y, np.zeros_like(self.X), np.zeros_like(self.Y),
+                                        scale=100, color='black', alpha=0.1)
+        self.quiv2 = self.axs[1].quiver(self.X, self.Y, np.zeros_like(self.X), np.zeros_like(self.Y),
+                                        scale=50, color='k', alpha=0.1)
+
+        self._prev_max_tau_mag = 10
+        self._prev_max_tau_z = 10
+        self.counter1 = 0
+        self.counter2 = 0
+
+        self._tau_mag_history = []
+        self._tau_z_history = []
+        self._noise_buffer_size = 100  # Number of recent samples to track
+        self._update_counter = 0
+        self._noise_report_interval = 50  # How often to print stats
+
+
         self.canvas.draw()
 
     def _style_colorbars(self):
@@ -95,55 +113,175 @@ class MomentMapWidget(QWidget):
             self.V += fy
 
         tau_mag = np.sqrt(self.Tau_x ** 2 + self.Tau_y ** 2)
+        max_tau_mag = max(np.nanmax(tau_mag), 1e-6)
+        max_tau_z = max(np.nanmax(np.abs(self.Tau_z)), 1e-6)
 
-        # Clear axes
-        self.axs[0].cla()
-        self.axs[1].cla()
+        levels_xy_changed = False
+        levels_z_changed = False
 
-        max_tau_mag = np.nanmax(tau_mag)
-        max_tau_z = np.nanmax(np.abs(self.Tau_z))
+        delta_buffer = 1.2
+        grow_thresh_xy = 1.05
+        shrink_thresh = 1.3
+        grow_thresh_z = 1.1
+        shrink_thresh_z = 1.5
+        min_delta_frac = 0.1  # 10% minimum change for levels
 
-        if max_tau_mag == 0:
-            max_tau_mag = 1e-6
-        if max_tau_z == 0:
-            max_tau_z = 1e-6
+        # τx/y logic
+        if max_tau_mag < 10:
+            if self._prev_max_tau_mag != 10:
+                print("[MomentMap] Max τx/y magnitude is too low, resetting to 10")
+                self._prev_max_tau_mag = 10
+                self.levels_xy = np.linspace(0, self._prev_max_tau_mag, 20)
+                levels_xy_changed = True
+                self._xy_shrink_count = 0
+                self._xy_grow_count = 0
+        else:
+            if max_tau_mag > self._prev_max_tau_mag:# * grow_thresh_xy:
+                self._xy_grow_count = getattr(self, '_xy_grow_count', 0) + 1
+                if self._xy_grow_count >= 3:
+                    new_max = max_tau_mag * delta_buffer
+                    if abs(new_max - self._prev_max_tau_mag) / self._prev_max_tau_mag > min_delta_frac:
+                        print(f"[MomentMap] Expanding levels for XY: {self._prev_max_tau_mag:.2f} -> {new_max:.2f}")
+                        self._prev_max_tau_mag = new_max
+                        self.levels_xy = np.linspace(0, self._prev_max_tau_mag, 20)
+                        levels_xy_changed = True
+                    self._xy_grow_count = 0
+            else:
+                self._xy_grow_count = 0
 
-        levels_xy = np.linspace(0, max_tau_mag, 20)
-        levels_z = np.linspace(-max_tau_z, max_tau_z, 20)
+            if max_tau_mag < self._prev_max_tau_mag / shrink_thresh:
+                self._xy_shrink_count = getattr(self, '_xy_shrink_count', 0) + 1
+                if self._xy_shrink_count >= 3:
+                    new_max = max_tau_mag * delta_buffer
+                    if abs(new_max - self._prev_max_tau_mag) / self._prev_max_tau_mag > min_delta_frac:
+                        print(f"[MomentMap] Shrinking levels for XY: {self._prev_max_tau_mag:.2f} -> {new_max:.2f}")
+                        self._prev_max_tau_mag = new_max
+                        self.levels_xy = np.linspace(0, self._prev_max_tau_mag, 20)
+                        levels_xy_changed = True
+                    self._xy_shrink_count = 0
+            else:
+                self._xy_shrink_count = 0
 
-        self.im1 = self.axs[0].contourf(self.X, self.Y, tau_mag, levels=levels_xy, cmap='coolwarm')
-        self.im2 = self.axs[1].contourf(self.X, self.Y, self.Tau_z, levels=levels_z, cmap='coolwarm')
+        # τz logic
+        if max_tau_z < 10:
+            if self._prev_max_tau_z != 10:
+                print("[MomentMap] Max τz is too low, resetting to 10")
+                self._prev_max_tau_z = 10
+                self.levels_z = np.linspace(-self._prev_max_tau_z, self._prev_max_tau_z, 20)
+                levels_z_changed = True
+                self._z_shrink_count = 0
+                self._z_grow_count = 0
+        else:
+            if max_tau_z > self._prev_max_tau_z:# * grow_thresh_z:
+                self._z_grow_count = getattr(self, '_z_grow_count', 0) + 1
+                if self._z_grow_count >= 3:
+                    new_max = max_tau_z * delta_buffer
+                    if abs(new_max - self._prev_max_tau_z) / self._prev_max_tau_z > min_delta_frac:
+                        print(f"[MomentMap] Expanding levels for Z: {self._prev_max_tau_z:.2f} -> {new_max:.2f}")
+                        self._prev_max_tau_z = new_max
+                        self.levels_z = np.linspace(-self._prev_max_tau_z, self._prev_max_tau_z, 20)
+                        levels_z_changed = True
+                    self._z_grow_count = 0
+            else:
+                self._z_grow_count = 0
 
-        self.axs[0].quiver(self.X, self.Y, self.Tau_y, self.Tau_x, scale=100, color='black', alpha=0.1)
-        self.axs[1].quiver(self.X, self.Y, self.U, self.V, scale=50, color='k', alpha=0.1)
+            if max_tau_z < self._prev_max_tau_z / shrink_thresh:
+                self._z_shrink_count = getattr(self, '_z_shrink_count', 0) + 1
+                if self._z_shrink_count >= 3:
+                    new_max = max_tau_z * delta_buffer
+                    if abs(new_max - self._prev_max_tau_z) / self._prev_max_tau_z > min_delta_frac:
+                        print(f"[MomentMap] Shrinking levels for Z: {self._prev_max_tau_z:.2f} -> {new_max:.2f}")
+                        self._prev_max_tau_z = new_max
+                        self.levels_z = np.linspace(-self._prev_max_tau_z, self._prev_max_tau_z, 20)
+                        levels_z_changed = True
+                    self._z_shrink_count = 0
+            else:
+                self._z_shrink_count = 0
+
+        self.im1.remove()
+        self.im2.remove()
+
+        self.im1 = self.axs[0].contourf(self.X, self.Y, tau_mag, levels=self.levels_xy, cmap='coolwarm')
+        self.im2 = self.axs[1].contourf(self.X, self.Y, self.Tau_z, levels=self.levels_z, cmap='coolwarm')
+
+        if levels_xy_changed:
+            self.counter1 += 1
+            print(f"[MomentMap] Levels for XY changed {self.counter1} times, updating.")
+            self.cbar_axes[0].cla()
+            self.cbar1 = self.fig.colorbar(self.im1, cax=self.cbar_axes[0], orientation='horizontal')
+            self._style_colorbars()
+        else:
+            self.cbar1.update_normal(self.im1)
+
+        if levels_z_changed:
+            self.counter2 += 1
+            print(f"[MomentMap] Levels for Z changed {self.counter2} times, updating.")
+            self.cbar_axes[1].cla()
+            self.cbar2 = self.fig.colorbar(self.im2, cax=self.cbar_axes[1], orientation='horizontal')
+            self._style_colorbars()
+        else:
+            self.cbar2.update_normal(self.im2)
+
+        self.quiv1.remove()
+        self.quiv2.remove()
+        self.quiv1 = self.axs[0].quiver(self.X, self.Y, self.Tau_y, self.Tau_x, scale=100, color='black', alpha=0.1)
+        self.quiv2 = self.axs[1].quiver(self.X, self.Y, self.U, self.V, scale=50, color='k', alpha=0.1)
 
         self.axs[0].set_title("Moment X/Y Magnitude + Direction")
         self.axs[1].set_title("Moment Z + Lateral Forces")
-        for ax in self.axs:
-            ax.set_xlabel("X")
-            ax.set_ylabel("Y")
-            ax.set_aspect("equal")
-
-        # --- Clean colorbar recreation ---
-        self.cbar_axes[0].cla()
-        self.cbar_axes[1].cla()
-        self.cbar1 = self.fig.colorbar(self.im1, cax=self.cbar_axes[0], orientation='horizontal')
-        self.cbar2 = self.fig.colorbar(self.im2, cax=self.cbar_axes[1], orientation='horizontal')
-        self._style_colorbars()
 
         self.canvas.draw_idle()
 
-        # Net forces + moments
         Fz_total = sum(fz_vals)
         Fx_total = sum(fx_vals)
         Fy_total = sum(fy_vals)
 
         tau_x_total = sum((y - 6) * fz for (x, y), fz in zip(pos_fz, fz_vals))
         tau_y_total = -sum((x - 10.5) * fz for (x, y), fz in zip(pos_fz, fz_vals))
-        tau_z_total = sum(x * fy - y * fx for (x, y), fx, fy in zip([*pos_fx, *pos_fy], fx_vals + [0], [0] + fy_vals))
+        tau_z_total = sum(
+            x * fy - y * fx
+            for (x, y), fx, fy in zip([*pos_fx, *pos_fy], fx_vals + [0], [0] + fy_vals)
+        )
 
         info = (
             f"Fx: {Fx_total:.2f}  Fy: {Fy_total:.2f}  Fz: {Fz_total:.2f} | "
             f"τx: {tau_x_total:.2f}  τy: {tau_y_total:.2f}  τz: {tau_z_total:.2f}"
         )
         self.info_label.setText(info)
+
+        # Collect data
+        self._tau_mag_history.append(max_tau_mag)
+        self._tau_z_history.append(max_tau_z)
+
+        # Trim to buffer size
+        if len(self._tau_mag_history) > self._noise_buffer_size:
+            self._tau_mag_history.pop(0)
+        if len(self._tau_z_history) > self._noise_buffer_size:
+            self._tau_z_history.pop(0)
+
+        # # Periodically compute and print noise stats
+        # self._update_counter += 1
+        # if self._update_counter % self._noise_report_interval == 0:
+        #     tau_mag_arr = np.array(self._tau_mag_history)
+        #     tau_z_arr = np.array(self._tau_z_history)
+
+        #     if tau_mag_arr.size > 1:
+        #         mean_mag = np.mean(tau_mag_arr)
+        #         std_mag = np.std(tau_mag_arr)
+        #         rel_std_mag = (std_mag / mean_mag * 100) if mean_mag != 0 else 0
+        #         print(f"[MomentMap] τx/y mean: {mean_mag:.2f}, std: {std_mag:.2f}, rel std: {rel_std_mag:.2f}%")
+
+        #     if tau_z_arr.size > 1:
+        #         mean_z = np.mean(tau_z_arr)
+        #         std_z = np.std(tau_z_arr)
+        #         rel_std_z = (std_z / mean_z * 100) if mean_z != 0 else 0
+        #         print(f"[MomentMap] τz mean: {mean_z:.2f}, std: {std_z:.2f}, rel std: {rel_std_z:.2f}%")
+
+
+    def hideEvent(self, event):
+        print("[MomentMap] Window hidden — moment map updates paused.")
+        event.accept()
+
+    def closeEvent(self, event):
+        print("[MomentMap] Window closed — moment map updates stopped.")
+        event.accept()

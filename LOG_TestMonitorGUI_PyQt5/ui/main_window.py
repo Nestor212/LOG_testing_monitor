@@ -259,7 +259,8 @@ class MainWindow(QMainWindow):
         fx_vals = [loads[5]]
         fy_vals = [loads[1], loads[3]]
         fz_vals = [loads[0], loads[2], loads[4]]
-        self.moment_map_window.update_forces(fx_vals, fy_vals, fz_vals)
+        if self.moment_map_window and self.moment_map_window.isVisible():
+            self.moment_map_window.update_forces(fx_vals, fy_vals, fz_vals)
 
     def update_sps_display(self, lc_sps, accel_sps):
         self.lc_sps_label.setText(f"LC SPS: {lc_sps}")
