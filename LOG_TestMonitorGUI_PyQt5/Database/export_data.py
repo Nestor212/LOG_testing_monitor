@@ -16,7 +16,7 @@ USAGE:
   python3 export_data.py 2025-06-26
 
   # Export data from a custom date/time range
-  python3 export_data.py "2025-06-27 16:00:00" "2025-06-27 16:10:00"
+  python3 export_data.py "2025-06-30 16:31:30" "2025-06-30 16:31:31"
 
 Output CSV files will be saved in the current directory with filenames indicating
 the selected date/time range.
@@ -28,6 +28,8 @@ import csv
 import datetime
 import os
 import sys
+
+output_folder = os.path.join(os.path.dirname(__file__), "ExportedData")
 
 def get_connection():
     db_path = os.path.join(os.path.dirname(__file__), "Data", "data_log.db")
@@ -56,14 +58,16 @@ def export_table(table, columns, start_time, end_time, output_path):
     rows = cursor.fetchall()
     conn.close()
 
-    with open(output_path, "w", newline="") as f:
+    full_path = os.path.join(output_folder, output_path)
+    os.makedirs(os.path.dirname(full_path), exist_ok=True)
+    with open(full_path, "a", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(columns)
         for row in rows:
             ts = parse_timestamp(row[0])
             if ts:
                 writer.writerow([ts.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]] + list(row[1:]))
-    print(f"✅ Exported {len(rows)} rows from {table} to {output_path}")
+    print(f"✅ Exported {len(rows)} rows from {table} to {full_path}")
 
 if __name__ == "__main__":
     if len(sys.argv) == 2:
@@ -89,16 +93,16 @@ if __name__ == "__main__":
 
     export_table("load_cells",
                  ["timestamp", "lc1", "lc2", "lc3", "lc4", "lc5", "lc6"],
-                 start, end, f"ExportedData/load_cells_{base}.csv")
+                 start, end, f"load_cells_{base}.csv")
 
     export_table("accelerometer",
                  ["timestamp", "ax", "ay", "az"],
-                 start, end, f"ExportedData/accelerometer_{base}.csv")
+                 start, end, f"accelerometer_{base}.csv")
 
     export_table("load_cell_zero_offsets",
                  ["timestamp", "lc1_offset", "lc2_offset", "lc3_offset", "lc4_offset", "lc5_offset", "lc6_offset"],
-                 start, end, f"ExportedData/load_cell_zero_offsets_{base}.csv")
+                 start, end, f"load_cell_zero_offsets_{base}.csv")
 
     export_table("accelerometer_zero_offsets",
                  ["timestamp", "ax_offset", "ay_offset", "az_offset"],
-                 start, end, f"ExportedData/accelerometer_zero_offsets_{base}.csv")
+                 start, end, f"accelerometer_zero_offsets_{base}.csv")
