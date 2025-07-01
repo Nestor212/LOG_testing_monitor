@@ -26,7 +26,6 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas, NavigationToolbar2QT as NavigationToolbar
 from ui.sql_worker import SqlWorker
 
-USE_SUBPLOTS = False
 
 import matplotlib.ticker as ticker
 
@@ -48,10 +47,9 @@ class PlotWindow(QWidget):
 
         self.ax = self.canvas.figure.add_subplot(111)
         # Map of LC index to axis label
-        axis_labels = ["Z", "Y", "Z", "Y", "Z", "X"]
-
+        self.axis_labels = ["Z", "Y", "Z", "Y", "Z", "X"]
         self.individual_lines = [
-            self.ax.plot([], [], label=f"LC{i+1} ({axis_labels[i]})")[0] for i in range(6)
+            self.ax.plot([], [], label=f"LC{i+1} ({self.axis_labels[i]})")[0] for i in range(6)
         ]
         self.net_lines = [self.ax.plot([], [], label=lbl)[0] for lbl in ["Net X", "Net Y", "Net Z"]]
         self.ax.set_xlabel("Time", fontsize=9)
@@ -91,15 +89,23 @@ class PlotWindow(QWidget):
         self.start_btn = QPushButton("Start")
         self.start_btn.clicked.connect(self.toggle_live_plotting)
 
+        self.plot_data_selector = QComboBox()
+        self.plot_data_selector.addItems(["Individual Load Cells", "Net Forces"])
+        self.plot_data_selector.currentIndexChanged.connect(self.refresh_plot)
+        self.plot_data_selector.currentIndexChanged.connect(lambda _: self.refresh_plot())
+
         self.plot_mode_selector = QComboBox()
-        self.plot_mode_selector.addItems(["Individual Load Cells", "Net Forces"])
-        self.plot_mode_selector.currentIndexChanged.connect(self.refresh_plot)
+        self.plot_mode_selector.addItems(["Single Plot", "Subplots"])
+        self.plot_mode_selector.setCurrentIndex(0)  # Default to Single Plot
+        self.plot_mode_selector.currentIndexChanged.connect(lambda _: self.refresh_plot())
 
         live_control_layout = QHBoxLayout()
         live_control_layout.addWidget(self.live_checkbox)
         live_control_layout.addWidget(QLabel("Window:"))
         live_control_layout.addWidget(self.window_selector)
         live_control_layout.addWidget(self.start_btn)
+        live_control_layout.addWidget(QLabel("Plot Data:"))
+        live_control_layout.addWidget(self.plot_data_selector)
         live_control_layout.addWidget(QLabel("Plot Mode:"))
         live_control_layout.addWidget(self.plot_mode_selector)
         live_control_layout.addStretch()
@@ -139,40 +145,121 @@ class PlotWindow(QWidget):
 
         self.live_avg_n = 18  # Default averaging for live mode
 
-    def refresh_plot(self):
-        mode = self.plot_mode_selector.currentText()
-        for line in self.individual_lines + self.net_lines:
-            line.set_visible(False)
+    # def update_plot_style(self, index):
+    #     if index == 0:
+    #         self.use_subplots = False
+    #     else:
+    #         self.use_subplots = True
 
-        if mode == "Individual Load Cells":
+    #     self.rebuild_plot_layout()
+
+    def rebuild_plot_layout(self, mode_number):
+        self.canvas.figure.clf()
+
+        if mode_number == 1:
+            # LC single plot
+            self.ax = self.canvas.figure.add_subplot(111)
+            self.axes = [self.ax]
+            self.individual_lines = [
+                self.ax.plot([], [], label=f"LC{i+1} ({self.axis_labels[i]})")[0] for i in range(6)
+            ]
+            self.net_lines = []
+            self.ax.legend(fontsize=7)
+            self.ax.set_xlabel("Time")
+            self.ax.set_ylabel("Load")
+            self.ax.grid(True)
+        elif mode_number == 2:
+            # LC subplots
+            self.axes = self.canvas.figure.subplots(nrows=6, sharex=True)
+            self.ax = None
+        elif mode_number == 3:
+            # Net single plot
+            self.ax = self.canvas.figure.add_subplot(111)
+            self.axes = [self.ax]
+            self.individual_lines = []
+            self.net_lines = [
+                self.ax.plot([], [], label=lbl)[0] for lbl in ["Net X", "Net Y", "Net Z"]
+            ]
+            self.ax.legend(fontsize=7)
+            self.ax.set_xlabel("Time")
+            self.ax.set_ylabel("Load")
+            self.ax.grid(True)
+        elif mode_number == 4:
+            # Net subplots
+            self.axes = self.canvas.figure.subplots(nrows=3, sharex=True)
+            self.ax = None
+
+    def refresh_plot(self):
+        plot_data = self.plot_data_selector.currentText()
+        plot_mode = self.plot_mode_selector.currentText()
+
+        # Determine mode_number
+        if plot_data == "Individual Load Cells" and plot_mode == "Single Plot":
+            mode_number = 1
+        elif plot_data == "Individual Load Cells" and plot_mode == "Subplots":
+            mode_number = 2
+        elif plot_data == "Net Forces" and plot_mode == "Single Plot":
+            mode_number = 3
+        elif plot_data == "Net Forces" and plot_mode == "Subplots":
+            mode_number = 4
+        else:
+            print("⚠ Unknown mode configuration")
+            return
+
+        # If mode has changed or no plot exists, rebuild
+        if getattr(self, 'current_mode', None) != mode_number:
+            self.rebuild_plot_layout(mode_number)
+            self.current_mode = mode_number
+
+        # Update data on the current layout
+        if mode_number == 1:
+            # LC single plot
             for i, line in enumerate(self.individual_lines):
                 line.set_data(self.x_data, self.y_data[i])
-                line.set_visible(True)
-        else:
-            net_x = [self.y_data[5][i] if i < len(self.y_data[5]) else 0 for i in range(len(self.x_data))]
-            net_y = [sum(self.y_data[j][i] if i < len(self.y_data[j]) else 0 for j in [1, 3]) for i in range(len(self.x_data))]
-            net_z = [sum(self.y_data[j][i] if i < len(self.y_data[j]) else 0 for j in [0, 2, 4]) for i in range(len(self.x_data))]
-
+            self.ax.relim()
+            self.ax.autoscale_view()
+        elif mode_number == 2:
+            # LC subplots
+            for i, ax in enumerate(self.axes):
+                ax.clear()
+                ax.plot(self.x_data, self.y_data[i], label=f"LC{i+1} ({self.axis_labels[i]})")
+                ax.set_ylabel(f"LC{i+1} ({self.axis_labels[i]})")
+                ax.legend(fontsize=7)
+                ax.grid(True)
+            self.axes[-1].set_xlabel("Time")
+        elif mode_number == 3:
+            # Net single plot
+            net_x = [self.y_data[5][j] if j < len(self.y_data[5]) else 0 for j in range(len(self.x_data))]
+            net_y = [sum(self.y_data[k][j] if j < len(self.y_data[k]) else 0 for k in [1,3]) for j in range(len(self.x_data))]
+            net_z = [sum(self.y_data[k][j] if j < len(self.y_data[k]) else 0 for k in [0,2,4]) for j in range(len(self.x_data))]
             self.net_lines[0].set_data(self.x_data, net_x)
             self.net_lines[1].set_data(self.x_data, net_y)
             self.net_lines[2].set_data(self.x_data, net_z)
-            for line in self.net_lines:
-                line.set_visible(True)
+            self.ax.relim()
+            self.ax.autoscale_view()
+        elif mode_number == 4:
+            # Net subplots
+            net_data = {
+                "Net X": [self.y_data[5][j] if j < len(self.y_data[5]) else 0 for j in range(len(self.x_data))],
+                "Net Y": [sum(self.y_data[k][j] if j < len(self.y_data[k]) else 0 for k in [1,3]) for j in range(len(self.x_data))],
+                "Net Z": [sum(self.y_data[k][j] if j < len(self.y_data[k]) else 0 for k in [0,2,4]) for j in range(len(self.x_data))]
+            }
+            for ax, (label, data) in zip(self.axes, net_data.items()):
+                ax.clear()
+                ax.plot(self.x_data, data, label=label)
+                ax.set_ylabel(label)
+                ax.legend(fontsize=7)
+                ax.grid(True)
+            self.axes[-1].set_xlabel("Time")
 
-        if self.x_data:
-            self.ax.set_xlim(self.x_data[0], self.x_data[-1])
-            all_y = []
-            for line in self.individual_lines + self.net_lines:
-                if line.get_visible():
-                    all_y += list(line.get_ydata())
-            if all_y:
-                self.ax.set_ylim(min(all_y), max(all_y))
-
-        handles = [line for line in self.individual_lines + self.net_lines if line.get_visible()]
-        labels = [line.get_label() for line in handles]
-        self.ax.legend(handles, labels, fontsize=7)
+        # Format x-axis
+        if mode_number in [1, 3]:
+            self.ax.xaxis.set_major_formatter(ticker.FuncFormatter(format_msec))
+            self.ax.grid(True)
+        else:
+            self.axes[-1].xaxis.set_major_formatter(ticker.FuncFormatter(format_msec))
+        self.canvas.figure.autofmt_xdate()
         self.canvas.draw()
-
 
     def toggle_live_mode(self, checked):
         self.live_mode = checked
