@@ -13,30 +13,26 @@
 # x = 0                         x = 16
 # y = 0
 
-
 import collections
 import numpy as np
-import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QCheckBox, QComboBox, QDateTimeEdit, QDialog
+    QCheckBox, QComboBox, QDateTimeEdit
 )
 from PyQt5.QtCore import QDateTime, QTimer, QThread
-# from PyQt5.QtGui import QFont
-# from PyQt5.QtCore import Qt
-
 from matplotlib.figure import Figure
-# import matplotlib.gridspec as gridspec
-from matplotlib.backends.backend_qt5agg import (
-    FigureCanvasQTAgg as FigureCanvas,
-    NavigationToolbar2QT as NavigationToolbar
-)
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas, NavigationToolbar2QT as NavigationToolbar
 from ui.sql_worker import SqlWorker
 
+USE_SUBPLOTS = False
 
-USE_SUBPLOTS = False  # Set to False to use one shared plot
+import matplotlib.ticker as ticker
+
+def format_msec(x, pos=None):
+    dt = mdates.num2date(x)
+    return dt.strftime("%H:%M:%S.") + f"{int(dt.microsecond/10000):02d}"
 
 class PlotWindow(QWidget):
     def __init__(self):
@@ -50,38 +46,32 @@ class PlotWindow(QWidget):
         self.canvas = FigureCanvas(Figure(figsize=(6, 10)))
         self.toolbar = NavigationToolbar(self.canvas, self)
 
-        if USE_SUBPLOTS:
-            self.axes = self.canvas.figure.subplots(nrows=6, sharex=True)
-            self.lines = [ax.plot([], [])[0] for ax in self.axes]
+        self.ax = self.canvas.figure.add_subplot(111)
+        # Map of LC index to axis label
+        axis_labels = ["Z", "Y", "Z", "Y", "Z", "X"]
 
-            for i, ax in enumerate(self.axes):
-                ax.set_ylabel(f"LC{i+1}", fontsize=8)
-                ax.grid(True)
-                ax.tick_params(labelsize=8)
-            self.axes[-1].set_xlabel("Time", fontsize=9)
-        else:
-            self.ax = self.canvas.figure.add_subplot(111)
-            self.lines = [self.ax.plot([], [], label=f"LC{i+1}")[0] for i in range(6)]
-            self.ax.set_xlabel("Time", fontsize=9)
-            self.ax.set_ylabel("Load", fontsize=8)
-            self.ax.legend(fontsize=7)
-            self.ax.grid(True)
-            self.ax.tick_params(labelsize=8)
-            self.axes = [self.ax]  # uniform interface
-
-        self.axes[-1].xaxis.set_major_formatter(mdates.DateFormatter("%H:%M:%S"))
+        self.individual_lines = [
+            self.ax.plot([], [], label=f"LC{i+1} ({axis_labels[i]})")[0] for i in range(6)
+        ]
+        self.net_lines = [self.ax.plot([], [], label=lbl)[0] for lbl in ["Net X", "Net Y", "Net Z"]]
+        self.ax.set_xlabel("Time", fontsize=9)
+        self.ax.set_ylabel("Load", fontsize=8)
+        self.ax.legend(fontsize=7)
+        self.ax.grid(True)
+        self.ax.tick_params(labelsize=8)
+        # self.ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M:%S.%0.2f"))
+        self.ax.xaxis.set_major_formatter(ticker.FuncFormatter(format_msec))        
         self.canvas.figure.autofmt_xdate()
 
+        # Controls
         self.live_timer = QTimer()
         self.live_timer.setInterval(500)
         self.live_timer.timeout.connect(self.request_latest_live_point)
 
         self.live_mode = True
         self.live_window_minutes = 1
-        self.live_avg_n = 30
-        self.max_live_points = self.live_window_minutes * 60 * 2  # live window at 2 Hz
+        self.max_live_points = self.live_window_minutes * 60 * 2
 
-        # Worker Thread
         self.worker_thread = QThread()
         self.worker = SqlWorker()
         self.worker.moveToThread(self.worker_thread)
@@ -90,7 +80,6 @@ class PlotWindow(QWidget):
         self.worker.error.connect(self.on_error)
         self.worker_thread.start()
 
-        # --- Live Controls ---
         self.live_checkbox = QCheckBox("Live")
         self.live_checkbox.setChecked(True)
         self.live_checkbox.toggled.connect(self.toggle_live_mode)
@@ -102,14 +91,19 @@ class PlotWindow(QWidget):
         self.start_btn = QPushButton("Start")
         self.start_btn.clicked.connect(self.toggle_live_plotting)
 
+        self.plot_mode_selector = QComboBox()
+        self.plot_mode_selector.addItems(["Individual Load Cells", "Net Forces"])
+        self.plot_mode_selector.currentIndexChanged.connect(self.refresh_plot)
+
         live_control_layout = QHBoxLayout()
         live_control_layout.addWidget(self.live_checkbox)
         live_control_layout.addWidget(QLabel("Window:"))
         live_control_layout.addWidget(self.window_selector)
         live_control_layout.addWidget(self.start_btn)
+        live_control_layout.addWidget(QLabel("Plot Mode:"))
+        live_control_layout.addWidget(self.plot_mode_selector)
         live_control_layout.addStretch()
 
-        # --- Historical Controls ---
         self.start_time_edit = QDateTimeEdit(QDateTime.currentDateTime().addSecs(-600))
         self.start_time_edit.setDisplayFormat("yyyy-MM-dd HH:mm:ss")
         self.start_time_edit.setCalendarPopup(True)
@@ -119,15 +113,10 @@ class PlotWindow(QWidget):
         self.end_time_edit.setCalendarPopup(True)
 
         self.averaging_selector = QComboBox()
-        self.averaging_selector.addItems([
-            "1 (60 Hz)", "2 (30 Hz)", "5 (12 Hz)", "10 (6 Hz)", "20 (3 Hz)", "30 (2 Hz)", "60 (1 Hz)"
-        ])
+        self.averaging_selector.addItems(["1 (64 Hz)", "2 (32 Hz)", "4 (16 Hz)", "8 (8 Hz)", "16 (4 Hz)", "32 (2 Hz)", "64 (1 Hz)"])
 
         self.plot_button = QPushButton("Plot")
         self.plot_button.clicked.connect(self.plot_historical)
-
-        # self.moment_map_button = QPushButton("Moment Map")
-        # self.moment_map_button.clicked.connect(self.toggle_moment_map_window)
 
         hist_control_layout = QHBoxLayout()
         hist_control_layout.addWidget(QLabel("Start:"))
@@ -137,7 +126,6 @@ class PlotWindow(QWidget):
         hist_control_layout.addWidget(QLabel("Average:"))
         hist_control_layout.addWidget(self.averaging_selector)
         hist_control_layout.addWidget(self.plot_button)
-        # hist_control_layout.addWidget(self.moment_map_button)
         hist_control_layout.addStretch()
 
         layout = QVBoxLayout()
@@ -149,16 +137,42 @@ class PlotWindow(QWidget):
 
         self.toggle_live_mode(self.live_mode)
 
-        self.moment_widget = None
-        # self.moment_widget.show()
+        self.live_avg_n = 18  # Default averaging for live mode
 
-    # def toggle_moment_map_window(self):
-    #     if not hasattr(self, "moment_widget") or self.moment_widget is None:
-    #         self.moment_widget = MomentMapWidget()
-    #     self.moment_widget.resize(1000, 500)
-    #     self.moment_widget.show()
-    #     self.moment_widget.raise_()
-    #     self.moment_widget.activateWindow()
+    def refresh_plot(self):
+        mode = self.plot_mode_selector.currentText()
+        for line in self.individual_lines + self.net_lines:
+            line.set_visible(False)
+
+        if mode == "Individual Load Cells":
+            for i, line in enumerate(self.individual_lines):
+                line.set_data(self.x_data, self.y_data[i])
+                line.set_visible(True)
+        else:
+            net_x = [self.y_data[5][i] if i < len(self.y_data[5]) else 0 for i in range(len(self.x_data))]
+            net_y = [sum(self.y_data[j][i] if i < len(self.y_data[j]) else 0 for j in [1, 3]) for i in range(len(self.x_data))]
+            net_z = [sum(self.y_data[j][i] if i < len(self.y_data[j]) else 0 for j in [0, 2, 4]) for i in range(len(self.x_data))]
+
+            self.net_lines[0].set_data(self.x_data, net_x)
+            self.net_lines[1].set_data(self.x_data, net_y)
+            self.net_lines[2].set_data(self.x_data, net_z)
+            for line in self.net_lines:
+                line.set_visible(True)
+
+        if self.x_data:
+            self.ax.set_xlim(self.x_data[0], self.x_data[-1])
+            all_y = []
+            for line in self.individual_lines + self.net_lines:
+                if line.get_visible():
+                    all_y += list(line.get_ydata())
+            if all_y:
+                self.ax.set_ylim(min(all_y), max(all_y))
+
+        handles = [line for line in self.individual_lines + self.net_lines if line.get_visible()]
+        labels = [line.get_label() for line in handles]
+        self.ax.legend(handles, labels, fontsize=7)
+        self.canvas.draw()
+
 
     def toggle_live_mode(self, checked):
         self.live_mode = checked
@@ -188,14 +202,14 @@ class PlotWindow(QWidget):
         if self.live_timer.isActive():
             self.live_timer.stop()
             self.start_btn.setText("Start")
-            self.live_checkbox.setEnabled(True)
+            # self.live_checkbox.setEnabled(True)
             self.window_selector.setEnabled(True)
         else:
             self.x_data.clear()
             self.y_data = [collections.deque() for _ in range(6)]
             self.live_timer.start()
             self.start_btn.setText("Stop")
-            self.live_checkbox.setEnabled(False)
+            # self.live_checkbox.setEnabled(False)
             self.window_selector.setEnabled(False)
 
     def request_latest_live_point(self):
@@ -206,11 +220,11 @@ class PlotWindow(QWidget):
         for i in range(6):
             self.y_data[i].append(values[i])
 
-        if self.moment_widget:
-            fx_vals = [self.y_data[5][-1]] if self.y_data[5] else [0]
-            fy_vals = [self.y_data[1][-1], self.y_data[3][-1]] if self.y_data[1] and self.y_data[3] else [0, 0]
-            fz_vals = [self.y_data[0][-1], self.y_data[2][-1], self.y_data[4][-1]] if self.y_data[0] and self.y_data[2] and self.y_data[4] else [0, 0, 0]
-            self.moment_widget.update_forces(fx_vals, fy_vals, fz_vals)
+        # if self.moment_widget:
+        #     fx_vals = [self.y_data[5][-1]] if self.y_data[5] else [0]
+        #     fy_vals = [self.y_data[1][-1], self.y_data[3][-1]] if self.y_data[1] and self.y_data[3] else [0, 0]
+        #     fz_vals = [self.y_data[0][-1], self.y_data[2][-1], self.y_data[4][-1]] if self.y_data[0] and self.y_data[2] and self.y_data[4] else [0, 0, 0]
+        #     self.moment_widget.update_forces(fx_vals, fy_vals, fz_vals)
 
         # Trim to max visible live window
         while len(self.x_data) > self.max_live_points:
@@ -239,24 +253,6 @@ class PlotWindow(QWidget):
     def on_error(self, msg):
         print(f"[SqlWorker] Error: {msg}")
 
-    def refresh_plot(self):
-        for i in range(6):
-            self.lines[i].set_data(self.x_data, self.y_data[i])
-
-        if self.x_data:
-            self.axes[-1].set_xlim(self.x_data[0], self.x_data[-1])
-
-        if USE_SUBPLOTS:
-            for ax in self.axes:
-                ax.relim()
-                ax.autoscale_view()
-        else:
-            all_y = [y for y_series in self.y_data for y in y_series]
-            if all_y:
-                self.ax.set_ylim(min(all_y), max(all_y))
-
-        self.canvas.draw()
-
     def connect_plot_events(self):
         self.canvas.mpl_connect("button_press_event", self.on_plot_click)
 
@@ -266,71 +262,6 @@ class PlotWindow(QWidget):
             nearest_index = min(range(len(self.x_data)), key=lambda i: abs(self.x_data[i] - click_time))
             y_vals = [self.y_data[i][nearest_index] for i in range(6)]
             print(f"Clicked near: {self.x_data[nearest_index]} -> {y_vals}")
-
-    # def show_moment_map(self):
-    #     import numpy as np
-
-    #     # Prepare data as before
-    #     pos_fx = np.array([[8, 6]])
-    #     pos_fy = np.array([[1, 1], [16, 1]])
-    #     pos_fz = np.array([[1, 8], [8, 1], [16, 8]])
-
-    #     fx_vals = [self.y_data[5][-1]] if self.y_data[5] else [0]
-    #     fy_vals = [self.y_data[1][-1], self.y_data[3][-1]] if self.y_data[1] and self.y_data[3] else [0, 0]
-    #     fz_vals = [self.y_data[0][-1], self.y_data[2][-1], self.y_data[4][-1]] if self.y_data[0] and self.y_data[2] and self.y_data[4] else [0, 0, 0]
-
-    #     x = np.linspace(0, 17, 30)
-    #     y = np.linspace(0, 9, 20)
-    #     X, Y = np.meshgrid(x, y)
-
-    #     Tau_x = np.zeros_like(X)
-    #     Tau_y = np.zeros_like(Y)
-    #     Tau_z = np.zeros_like(X)
-    #     U = np.zeros_like(X)
-    #     V = np.zeros_like(Y)
-
-    #     for (px, py), fz in zip(pos_fz, fz_vals):
-    #         dx = Y - py
-    #         dy = X - px
-    #         Tau_x += dx * fz
-    #         Tau_y -= dy * fz
-
-    #     for (px, py), fx in zip(pos_fx, fx_vals):
-    #         Tau_z += -(Y - py) * fx
-    #         U += fx
-    #     for (px, py), fy in zip(pos_fy, fy_vals):
-    #         Tau_z += (X - px) * fy
-    #         V += fy
-
-    #     # --- Create a dialog window ---
-    #     dialog = QDialog(self)
-    #     dialog.setWindowTitle("Moment Map")
-    #     layout = QVBoxLayout(dialog)
-    #     fig = Figure(figsize=(10, 4))
-    #     canvas = FigureCanvas(fig)
-    #     layout.addWidget(canvas)
-
-    #     axs = fig.subplots(1, 3)
-    #     c1 = axs[0].contourf(X, Y, Tau_x, cmap='coolwarm')
-    #     axs[0].set_title("Torque around X (pitch)")
-    #     fig.colorbar(c1, ax=axs[0])
-
-    #     c2 = axs[1].contourf(X, Y, Tau_y, cmap='coolwarm')
-    #     axs[1].set_title("Torque around Y (roll)")
-    #     fig.colorbar(c2, ax=axs[1])
-
-    #     c3 = axs[2].contourf(X, Y, Tau_z, cmap='coolwarm')
-    #     axs[2].quiver(X, Y, U, V, scale=50, color='k', alpha=0.7)
-    #     axs[2].set_title("Torque Z + Lateral Forces")
-    #     fig.colorbar(c3, ax=axs[2])
-
-    #     for ax in axs:
-    #         ax.set_xlabel("X")
-    #         ax.set_ylabel("Y")
-    #         ax.set_aspect("equal")
-
-    #     canvas.draw()
-    #     dialog.exec_()
 
     def hideEvent(self, event):
         print("[PlotWindow] Window hidden — live timer paused.")

@@ -8,7 +8,8 @@ from comms.teensy_socket import TeensySocketThread
 from comms.parser_emitter import ParserEmitter
 from PyQt5.QtCore import QTimer, QTime
 from ui.plotter import PlotWindow
-from ui.moment_map import MomentMapWidget
+# from ui.moment_map import MomentMapWidget
+from Database.export_data import DataExportDialog as Data
 import csv
 import os
 import datetime
@@ -29,7 +30,8 @@ class MainWindow(QMainWindow):
         self.setGeometry(100, 100, 800, 550)
 
         self.plot_window = PlotWindow()
-        self.moment_map_window = MomentMapWidget()
+        # self.moment_map_window = MomentMapWidget()
+        self.export_data_window = Data()
 
         self.socket_thread = None
         self.signal_emitter = ParserEmitter()
@@ -149,17 +151,45 @@ class MainWindow(QMainWindow):
         self.plot_btn = QPushButton("Open Plotter")
         self.plot_btn.clicked.connect(self.show_plot_window)
 
-        self.moment_map_btn = QPushButton("Open Moment Map")
-        self.moment_map_btn.clicked.connect(self.show_moment_map_window)
+        # self.moment_map_btn = QPushButton("Open Moment Map")
+        # self.moment_map_btn.clicked.connect(self.show_moment_map_window)
+
+        self.export_data_btn = QPushButton("Export Data")
+        self.export_data_btn.clicked.connect(self.show_export_data_window)
 
         zero_grid = QGridLayout()
         zero_grid.addWidget(self.zero_lc_btn, 0, 0)
         zero_grid.addWidget(self.zero_accel_btn, 0, 1)
-        zero_grid.addWidget(self.plot_btn, 1, 0)
-        zero_grid.addWidget(self.moment_map_btn, 1, 1)
+        zero_grid.addWidget(self.plot_btn, 0, 2)
+        # zero_grid.addWidget(self.moment_map_btn, 0, 3)
+        zero_grid.addWidget(self.export_data_btn, 0, 3)
 
-        legend = QLabel("Arrows indicate direction of applied force.\n X: ←→ , Y: ↑↓ , Z: ▼ (down) ▲ (up)")
+
+        legend = QLabel("Arrows indicate direction of applied force. X: ←→ , Y: ↑↓ , Z: ▼ (down) ▲ (up)")
         legend.setAlignment(Qt.AlignCenter)
+
+        # Net force labels
+        self.net_force_labels = {}
+        for axis in ["Fx", "Fy", "Fz"]:
+            lbl = QLabel(f"{axis}: ---")
+            lbl.setFont(QFont("Arial", 14))
+            lbl.setAlignment(Qt.AlignCenter)
+            self.net_force_labels[axis] = lbl
+
+        self.total_force_label = QLabel("Total: --- lbf")
+        self.total_force_label.setFont(QFont("Arial", 14))
+        self.total_force_label.setAlignment(Qt.AlignCenter)
+
+        net_force_grid = QHBoxLayout()
+        net_force_grid.addWidget(self.net_force_labels["Fx"])
+        net_force_grid.addWidget(self.net_force_labels["Fy"])
+        net_force_grid.addWidget(self.net_force_labels["Fz"])
+        net_force_grid.addWidget(self.total_force_label)
+
+
+        net_force_title = QLabel("Net Forces (lbf)")
+        net_force_title.setFont(QFont("Arial", 16, QFont.Bold))
+        net_force_title.setAlignment(Qt.AlignCenter)
 
         # Main Layout
         main_layout = QVBoxLayout()
@@ -167,6 +197,8 @@ class MainWindow(QMainWindow):
         main_layout.addLayout(forces_header_layout)
         main_layout.addWidget(frame, alignment=Qt.AlignCenter)
         main_layout.addWidget(legend)
+        main_layout.addWidget(net_force_title)
+        main_layout.addLayout(net_force_grid)
         main_layout.addLayout(accel_header_layout)
         main_layout.addLayout(accel_grid)
         main_layout.addLayout(zero_grid)
@@ -182,15 +214,21 @@ class MainWindow(QMainWindow):
             writer = csv.writer(f)
             writer.writerow(["Timestamp", "LC_SPS", "Accel_SPS"])
 
-    def show_moment_map_window(self):
-        self.moment_map_window.show()
-        self.moment_map_window.raise_()
-        self.moment_map_window.activateWindow()
+    # def show_moment_map_window(self):
+    #     self.moment_map_window.show()
+    #     self.moment_map_window.raise_()
+    #     self.moment_map_window.activateWindow()
+
+    def show_export_data_window(self):
+        self.export_data_window.show()
+        self.export_data_window.raise_()
+        self.export_data_window.activateWindow()
 
     def show_plot_window(self):
         self.plot_window.show()
 
     def zero_loads(self):
+        print("Zeroing loads...")
         if self.socket_thread:
             self.socket_thread.zero_loads()
 
@@ -255,12 +293,32 @@ class MainWindow(QMainWindow):
                 for axis in ["X", "Y", "Z"]:
                     self.accel_labels[axis].setText(f"{axis}: ---")
 
-        # Update moment map
-        fx_vals = [loads[5]]
-        fy_vals = [loads[1], loads[3]]
-        fz_vals = [loads[0], loads[2], loads[4]]
-        if self.moment_map_window and self.moment_map_window.isVisible():
-            self.moment_map_window.update_forces(fx_vals, fy_vals, fz_vals)
+        force_map = {
+            "Fx": ([5], "X"),
+            "Fy": ([1, 3], "Y"),
+            "Fz": ([0, 2, 4], "Z")
+        }
+
+        moment_map_forces = {}
+        total_force = 0
+
+        for label_key, (indices, axis_for_arrow) in force_map.items():
+            vals = [loads[i] for i in indices]
+            net_force = sum(vals)
+            total_force += abs(net_force)  # or net_force if you want algebraic sum
+            self.net_force_labels[label_key].setText(f"{label_key}: {format_force(net_force, axis_for_arrow)} lbf")
+            moment_map_forces[label_key] = vals
+
+        self.total_force_label.setText(f"Total: {total_force:.1f} lbf")
+
+        # # Update moment map
+        # if self.moment_map_window and self.moment_map_window.isVisible():
+        #     self.moment_map_window.update_forces(
+        #         moment_map_forces["Fx"],
+        #         moment_map_forces["Fy"],
+        #         moment_map_forces["Fz"]
+        #     )
+
 
     def update_sps_display(self, lc_sps, accel_sps):
         self.lc_sps_label.setText(f"LC SPS: {lc_sps}")

@@ -9,6 +9,7 @@ from comms.parser_emitter import ParserEmitter
 from Database.db import get_connection  # Ensure this is at the top of your file
 from queue import Queue
 import threading
+import numpy as np
 
 os.makedirs("./Database/Data", exist_ok=True)
 
@@ -22,7 +23,12 @@ class TeensySocketThread(QThread):
         self.emitter = emitter
         self.last_emit_time = time.time()
         self.latest_data = None
+
         self.emit_interval = 0.25  # 20 Hz
+        self.avg_load_buffer = []
+        self.avg_accel_buffer = []
+        self.avg_accel_on = False
+        self.avg_accel_stale = False
 
         base_dir = os.path.dirname(os.path.abspath(__file__))
         self.data_dir = os.path.join(base_dir, "..", "Database", "Data")
@@ -42,7 +48,6 @@ class TeensySocketThread(QThread):
         self._db_writer_thread = threading.Thread(target=self._db_writer_loop, daemon=True)
         self._db_writer_thread.start()
 
-
     def zero_loads(self):
         if self.latest_data:
             _, loads, *_ = self.latest_data
@@ -61,10 +66,40 @@ class TeensySocketThread(QThread):
     def emit_loop(self):
         while self.running:
             time.sleep(self.emit_interval)
-            if self.latest_data:
-                # print(f"Emitting {time.time()}")
-                timestamp, loads, accels, accel_on, accel_stale = self.latest_data
-                self.emitter.new_data.emit(timestamp, loads, accels, accel_on, accel_stale)
+            timestamp_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+            if self.avg_load_buffer:
+                avg_loads = np.mean(self.avg_load_buffer, axis=0).tolist()
+            else:
+                avg_loads = [0.0] * 6
+
+            if self.avg_accel_buffer:
+                avg_accels = np.mean(self.avg_accel_buffer, axis=0).tolist()
+            else:
+                avg_accels = [0.0, 0.0, 0.0]
+
+            # Update latest_data for consistency
+            self.latest_data = (
+                timestamp_str,
+                avg_loads,
+                avg_accels,
+                self.avg_accel_on,
+                self.avg_accel_stale
+            )
+
+            self.emitter.new_data.emit(
+                timestamp_str,
+                avg_loads,
+                avg_accels,
+                self.avg_accel_on,
+                self.avg_accel_stale
+            )
+
+            # Reset buffers for next interval
+            self.avg_load_buffer.clear()
+            self.avg_accel_buffer.clear()
+            self.avg_accel_on = False
+            self.avg_accel_stale = False
 
     def run(self):
         print("🔌 Starting socket thread.", flush=True)
@@ -153,12 +188,18 @@ class TeensySocketThread(QThread):
                 self.accel_buffer.append([timestamp_str] + adjusted_accels)
 
             adjusted_loads = [l - offset - zero_load for l, offset, zero_load in zip(loads, self.load_offsets, self.lc_zero_load_offset)]
-            # print(f"Adjusted loads: {adjusted_loads}", flush=True)
 
+            # Update buffer for logging data to db
             self.load_buffer.append((timestamp, *adjusted_loads))
 
-            self.latest_data = (timestamp_str, adjusted_loads, self.last_valid_accels, accel_on, accel_stale)
+            # Update average buffers for UI displau
+            self.avg_load_buffer.append(adjusted_loads)
+            if accels:
+                self.avg_accel_buffer.append(self.last_valid_accels)
+                self.avg_accel_on = True
+                self.avg_accel_stale = accel_stale
 
+            # self.latest_data = (timestamp_str, adjusted_loads, self.last_valid_accels, accel_on, accel_stale)
             # --- SPS counter ---
             current_sec = int(raw_ts)
             if not hasattr(self, 'last_sps_sec'):
