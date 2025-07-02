@@ -18,6 +18,7 @@ def get_db_path():
 
 def get_connection():
     db_path = get_db_path()
+    print(f"Connecting to database at: {db_path}")  # Debugging lin
     conn = sqlite3.connect(db_path, detect_types=sqlite3.PARSE_DECLTYPES)
     conn.execute("PRAGMA journal_mode=WAL;")
     return conn

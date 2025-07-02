@@ -1,37 +1,41 @@
-"""
-extract_data.py
-
-This script extracts logged sensor data from the SQLite database (data_log.db)
-into CSV files. It supports exporting from four tables:
-  - load_cells
-  - accelerometer
-  - load_cell_zero_offsets
-  - accelerometer_zero_offsets
-
-Each table is exported to a separate CSV file, including timestamped entries within
-a specified time window.
-
-USAGE:
-  # Export all data from a single date (00:00:00 to 23:59:59 on 2025-06-26)
-  python3 export_data.py 2025-06-26
-
-  # Export data from a custom date/time range
-  python3 export_data.py "2025-06-30 16:31:30" "2025-06-30 16:31:31"
-
-Output CSV files will be saved in the current directory with filenames indicating
-the selected date/time range.
-"""
-
-
 import sqlite3
 import csv
 import datetime
 import os
 import sys
 
-from Database.db import get_connection
 
-output_folder = os.path.join(os.path.dirname(__file__), "ExportedData")
+def get_connection():
+    # Locate the database relative to where this script lives
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    db_path = os.path.join(base_dir, "Data", "data_log.db")
+
+    # Or if your DB lives somewhere fixed (recommended if multiple scripts access it):
+    # db_path = os.path.expanduser("~/Documents/LOG_testing_monitor/Database/Data/data_log.db")
+
+    conn = sqlite3.connect(db_path, detect_types=sqlite3.PARSE_DECLTYPES)
+    conn.execute("PRAGMA journal_mode=WAL;")  # Enable concurrent reads/writes
+    return conn
+
+
+def print_usage():
+    print("""
+extract_data.py
+
+Extract logged sensor data into CSV files.
+
+USAGE:
+  python3 extract_data.py YYYY-MM-DD
+      Export all data from that date (00:00:00 to 23:59:59)
+
+  python3 extract_data.py "YYYY-MM-DD HH:MM:SS" "YYYY-MM-DD HH:MM:SS"
+      Export data from custom start and end time
+
+OPTIONS:
+  -h, --help    Show this help message
+""")
+
+output_folder = os.path.join(os.path.expanduser("~"), "LOG_Exports")
 
 def parse_timestamp(ts):
     if isinstance(ts, datetime.datetime):
@@ -56,9 +60,10 @@ def export_table(table, columns, start_time, end_time, output_path):
     rows = cursor.fetchall()
     conn.close()
 
+    os.makedirs(output_folder, exist_ok=True)
     full_path = os.path.join(output_folder, output_path)
-    os.makedirs(os.path.dirname(full_path), exist_ok=True)
-    with open(full_path, "a", newline="") as f:
+
+    with open(full_path, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(columns)
         for row in rows:
@@ -68,23 +73,28 @@ def export_table(table, columns, start_time, end_time, output_path):
     print(f"✅ Exported {len(rows)} rows from {table} to {full_path}")
 
 if __name__ == "__main__":
-    if len(sys.argv) == 2:
+    args = sys.argv[1:]
+    if not args or args[0] in ("-h", "--help"):
+        print_usage()
+        sys.exit(0)
+
+    if len(args) == 1:
         try:
-            date = datetime.datetime.strptime(sys.argv[1], "%Y-%m-%d").date()
+            date = datetime.datetime.strptime(args[0], "%Y-%m-%d").date()
             start = datetime.datetime.combine(date, datetime.time.min)
             end = datetime.datetime.combine(date, datetime.time.max)
         except ValueError:
-            print("Usage: python extract_data.py YYYY-MM-DD")
+            print("❌ Invalid date format. Use YYYY-MM-DD.")
             sys.exit(1)
-    elif len(sys.argv) == 3:
+    elif len(args) == 2:
         try:
-            start = datetime.datetime.strptime(sys.argv[1], "%Y-%m-%d %H:%M:%S")
-            end = datetime.datetime.strptime(sys.argv[2], "%Y-%m-%d %H:%M:%S")
+            start = datetime.datetime.strptime(args[0], "%Y-%m-%d %H:%M:%S")
+            end = datetime.datetime.strptime(args[1], "%Y-%m-%d %H:%M:%S")
         except ValueError:
-            print("Usage: python extract_data.py \"YYYY-MM-DD HH:MM:SS\" \"YYYY-MM-DD HH:MM:SS\"")
+            print("❌ Invalid datetime format. Use \"YYYY-MM-DD HH:MM:SS\"")
             sys.exit(1)
     else:
-        print("Usage:\n  python extract_data.py YYYY-MM-DD\n  python extract_data.py \"YYYY-MM-DD HH:MM:SS\" \"YYYY-MM-DD HH:MM:SS\"")
+        print_usage()
         sys.exit(1)
 
     base = f"{start.strftime('%Y-%m-%d_%H-%M-%S')}_to_{end.strftime('%Y-%m-%d_%H-%M-%S')}"
