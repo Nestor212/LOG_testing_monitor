@@ -5,14 +5,10 @@ import os
 import sys
 
 def get_db_path():
-    if getattr(sys, 'frozen', False):
-        # PyInstaller executable — fixed location
-        base_dir = os.path.expanduser("~/Documents/LOG_testing_monitor/LOG_TestMonitorGUI_PyQt5/Database/Data")
-    else:
-        # Running from source — relative to script
-        base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Data")
-    
+
+    base_dir = os.path.expanduser("~/Documents/LOG_testing_monitor/LOG_TestMonitorGUI_PyQt5/Database/Data")
     os.makedirs(base_dir, exist_ok=True)
+    
     return os.path.join(base_dir, "data_log.db")
 
 def get_connection():
@@ -29,10 +25,10 @@ extract_data.py
 Extract logged sensor data into CSV files.
 
 USAGE:
-  python3 extract_data.py YYYY-MM-DD
+  python3 export_data_commandline.py YYYY-MM-DD
       Export all data from that date (00:00:00 to 23:59:59)
 
-  python3 extract_data.py "YYYY-MM-DD HH:MM:SS" "YYYY-MM-DD HH:MM:SS"
+  python3 export_data_commandline.py "YYYY-MM-DD HH:MM:SS" "YYYY-MM-DD HH:MM:SS"
       Export data from custom start and end time
 
 OPTIONS:
