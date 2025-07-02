@@ -29,11 +29,9 @@ import datetime
 import os
 import sys
 
-output_folder = os.path.join(os.path.dirname(__file__), "ExportedData")
+from Database.db import get_connection
 
-def get_connection():
-    db_path = os.path.join(os.path.dirname(__file__), "Data", "data_log.db")
-    return sqlite3.connect(db_path, detect_types=sqlite3.PARSE_DECLTYPES)
+output_folder = os.path.join(os.path.dirname(__file__), "ExportedData")
 
 def parse_timestamp(ts):
     if isinstance(ts, datetime.datetime):

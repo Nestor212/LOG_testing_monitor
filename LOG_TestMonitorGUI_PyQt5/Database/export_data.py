@@ -7,6 +7,8 @@ import sqlite3
 import csv
 import datetime
 import os
+from Database.db import get_connection
+
 
 class DataExportDialog(QDialog):
     def __init__(self, parent=None):
@@ -108,11 +110,7 @@ class DataExportDialog(QDialog):
             QMessageBox.critical(self, "Export Failed", f"❌ Error: {e}")
 
     def export_table(self, table, columns, start_time, end_time, filename):
-        db_dir = os.path.join(os.path.dirname(__file__), "Data")
-        os.makedirs(db_dir, exist_ok=True)
-        db_path = os.path.join(db_dir, "data_log.db")
-        
-        conn = sqlite3.connect(db_path, detect_types=sqlite3.PARSE_DECLTYPES)
+        conn = get_connection()
         cursor = conn.cursor()
         cursor.execute(f"""
             SELECT {', '.join(columns)}
