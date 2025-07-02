@@ -5,10 +5,8 @@ import os
 import sys
 
 def get_db_path():
-
     base_dir = os.path.expanduser("~/Documents/LOG_testing_monitor/LOG_TestMonitorGUI_PyQt5/Database/Data")
     os.makedirs(base_dir, exist_ok=True)
-    
     return os.path.join(base_dir, "data_log.db")
 
 def get_connection():
@@ -20,35 +18,28 @@ def get_connection():
 
 def print_usage():
     print("""
-extract_data.py
+extract_data_commandline.py
 
 Extract logged sensor data into CSV files.
 
 USAGE:
-  python3 export_data_commandline.py YYYY-MM-DD
+  python3 extract_data_commandline.py YYYY-MM-DD [options]
       Export all data from that date (00:00:00 to 23:59:59)
 
-  python3 export_data_commandline.py "YYYY-MM-DD HH:MM:SS" "YYYY-MM-DD HH:MM:SS"
+  python3 extract_data_commandline.py "YYYY-MM-DD HH:MM:SS" "YYYY-MM-DD HH:MM:SS" [options]
       Export data from custom start and end time
 
 OPTIONS:
-  -h, --help    Show this help message
+  --outdir DIR    Output directory (default: ~/Desktop/exportedData)
+  --load_cells    Export Load Cells
+  --accelerometer Export Accelerometer
+  --lc_offsets    Export Load Cell Zero Offsets
+  --accel_offsets Export Accelerometer Zero Offsets
+  --all           Export all data (default)
+  -h, --help      Show this help message
 """)
 
-output_folder = os.path.join(os.path.expanduser("~/Desktop"), "exportedData")
-
-def parse_timestamp(ts):
-    if isinstance(ts, datetime.datetime):
-        return ts
-    for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
-        try:
-            return datetime.datetime.strptime(ts, fmt)
-        except ValueError:
-            continue
-    print(f"⚠️ Skipping unparseable timestamp: {ts}")
-    return None
-
-def export_table(table, columns, start_time, end_time, output_path):
+def export_table(table, columns, start_time, end_time, output_folder, filename):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(f"""
@@ -61,56 +52,95 @@ def export_table(table, columns, start_time, end_time, output_path):
     conn.close()
 
     os.makedirs(output_folder, exist_ok=True)
-    full_path = os.path.join(output_folder, output_path)
+    full_path = os.path.join(output_folder, filename)
 
     with open(full_path, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(columns)
         for row in rows:
-            ts = parse_timestamp(row[0])
-            if ts:
-                writer.writerow([ts.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]] + list(row[1:]))
+            ts = row[0]
+            if isinstance(ts, datetime.datetime):
+                ts_str = ts.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            else:
+                ts_str = str(ts)
+            writer.writerow([ts_str] + list(row[1:]))
+
     print(f"✅ Exported {len(rows)} rows from {table} to {full_path}")
+    return len(rows)
 
 if __name__ == "__main__":
     args = sys.argv[1:]
-    if not args or args[0] in ("-h", "--help"):
+    if not args or "-h" in args or "--help" in args:
         print_usage()
         sys.exit(0)
 
-    if len(args) == 1:
-        try:
-            date = datetime.datetime.strptime(args[0], "%Y-%m-%d").date()
+    output_folder = os.path.expanduser("~/Desktop/exportedData")
+    export_load = export_accel = export_lc_offsets = export_accel_offsets = False
+
+    date_args = []
+    i = 0
+    while i < len(args):
+        if args[i].startswith("--"):
+            break
+        date_args.append(args[i])
+        i += 1
+
+    options = args[i:]
+    while options:
+        opt = options.pop(0)
+        if opt == "--outdir":
+            output_folder = os.path.expanduser(options.pop(0))
+        elif opt == "--load_cells":
+            export_load = True
+        elif opt == "--accelerometer":
+            export_accel = True
+        elif opt == "--lc_offsets":
+            export_lc_offsets = True
+        elif opt == "--accel_offsets":
+            export_accel_offsets = True
+        elif opt == "--all":
+            export_load = export_accel = export_lc_offsets = export_accel_offsets = True
+        else:
+            print(f"❌ Unknown option: {opt}")
+            print_usage()
+            sys.exit(1)
+
+    if not any([export_load, export_accel, export_lc_offsets, export_accel_offsets]):
+        export_load = export_accel = export_lc_offsets = export_accel_offsets = True
+
+    try:
+        if len(date_args) == 1:
+            date = datetime.datetime.strptime(date_args[0], "%Y-%m-%d").date()
             start = datetime.datetime.combine(date, datetime.time.min)
             end = datetime.datetime.combine(date, datetime.time.max)
-        except ValueError:
-            print("❌ Invalid date format. Use YYYY-MM-DD.")
-            sys.exit(1)
-    elif len(args) == 2:
-        try:
-            start = datetime.datetime.strptime(args[0], "%Y-%m-%d %H:%M:%S")
-            end = datetime.datetime.strptime(args[1], "%Y-%m-%d %H:%M:%S")
-        except ValueError:
-            print("❌ Invalid datetime format. Use \"YYYY-MM-DD HH:MM:SS\"")
-            sys.exit(1)
-    else:
+        elif len(date_args) == 2:
+            start = datetime.datetime.strptime(date_args[0], "%Y-%m-%d %H:%M:%S")
+            end = datetime.datetime.strptime(date_args[1], "%Y-%m-%d %H:%M:%S")
+        else:
+            raise ValueError("Invalid date/time arguments")
+    except Exception as e:
+        print(f"❌ {e}")
         print_usage()
         sys.exit(1)
 
     base = f"{start.strftime('%Y-%m-%d_%H-%M-%S')}_to_{end.strftime('%Y-%m-%d_%H-%M-%S')}"
 
-    export_table("load_cells",
-                 ["timestamp", "lc1", "lc2", "lc3", "lc4", "lc5", "lc6"],
-                 start, end, f"load_cells_{base}.csv")
+    if export_load:
+        export_table("load_cells",
+                     ["timestamp", "lc1", "lc2", "lc3", "lc4", "lc5", "lc6"],
+                     start, end, output_folder, f"load_cells_{base}.csv")
 
-    export_table("accelerometer",
-                 ["timestamp", "ax", "ay", "az"],
-                 start, end, f"accelerometer_{base}.csv")
+    if export_accel:
+        export_table("accelerometer",
+                     ["timestamp", "ax", "ay", "az"],
+                     start, end, output_folder, f"accelerometer_{base}.csv")
 
-    export_table("load_cell_zero_offsets",
-                 ["timestamp", "lc1_offset", "lc2_offset", "lc3_offset", "lc4_offset", "lc5_offset", "lc6_offset"],
-                 start, end, f"load_cell_zero_offsets_{base}.csv")
+    if export_lc_offsets:
+        export_table("load_cell_zero_offsets",
+                     ["timestamp", "lc1_offset", "lc2_offset", "lc3_offset", "lc4_offset", "lc5_offset", "lc6_offset"],
+                     start, end, output_folder, f"load_cell_zero_offsets_{base}.csv")
 
-    export_table("accelerometer_zero_offsets",
-                 ["timestamp", "ax_offset", "ay_offset", "az_offset"],
-                 start, end, f"accelerometer_zero_offsets_{base}.csv")
+    if export_accel_offsets:
+        export_table("accelerometer_zero_offsets",
+                     ["timestamp", "ax_offset", "ay_offset", "az_offset"],
+                     start, end, output_folder, f"accelerometer_zero_offsets_{base}.csv")
