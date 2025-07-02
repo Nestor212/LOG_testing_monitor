@@ -1,13 +1,25 @@
 import sqlite3
 import os
 
-def get_connection():
-    db_dir = os.path.join(os.path.dirname(__file__), "Data")
-    os.makedirs(db_dir, exist_ok=True)
-    db_path = os.path.join(db_dir, "data_log.db")
+import sqlite3
+import os
+import sys
 
+def get_db_path():
+    if getattr(sys, 'frozen', False):
+        # PyInstaller executable
+        base_dir = os.path.expanduser("~/.LOG_testing_monitor")
+    else:
+        # Running from source
+        base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Data")
+
+    os.makedirs(base_dir, exist_ok=True)
+    return os.path.join(base_dir, "data_log.db")
+
+def get_connection():
+    db_path = get_db_path()
     conn = sqlite3.connect(db_path, detect_types=sqlite3.PARSE_DECLTYPES)
-    conn.execute("PRAGMA journal_mode=WAL;")  # Enable concurrent reads/writes
+    conn.execute("PRAGMA journal_mode=WAL;")
     return conn
 
 def initialize_db():
