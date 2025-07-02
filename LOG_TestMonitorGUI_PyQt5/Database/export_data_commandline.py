@@ -4,19 +4,23 @@ import datetime
 import os
 import sys
 
+def get_db_path():
+    if getattr(sys, 'frozen', False):
+        # PyInstaller executable — fixed location
+        base_dir = os.path.expanduser("~/Documents/LOG_testing_monitor/LOG_TestMonitorGUI_PyQt5/Database/Data")
+    else:
+        # Running from source — relative to script
+        base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Data")
+    
+    os.makedirs(base_dir, exist_ok=True)
+    return os.path.join(base_dir, "data_log.db")
 
 def get_connection():
-    # Locate the database relative to where this script lives
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    db_path = os.path.join(base_dir, "Data", "data_log.db")
-
-    # Or if your DB lives somewhere fixed (recommended if multiple scripts access it):
-    # db_path = os.path.expanduser("~/Documents/LOG_testing_monitor/Database/Data/data_log.db")
-
+    db_path = get_db_path()
+    print(f"🔍 Using DB at: {db_path}")
     conn = sqlite3.connect(db_path, detect_types=sqlite3.PARSE_DECLTYPES)
-    conn.execute("PRAGMA journal_mode=WAL;")  # Enable concurrent reads/writes
+    conn.execute("PRAGMA journal_mode=WAL;")
     return conn
-
 
 def print_usage():
     print("""
@@ -35,7 +39,7 @@ OPTIONS:
   -h, --help    Show this help message
 """)
 
-output_folder = os.path.join(os.path.expanduser("~"), "LOG_Exports")
+output_folder = os.path.join(os.path.expanduser("~/Desktop"), "exportedData")
 
 def parse_timestamp(ts):
     if isinstance(ts, datetime.datetime):

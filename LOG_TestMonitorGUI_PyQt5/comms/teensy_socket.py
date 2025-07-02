@@ -12,8 +12,6 @@ from queue import Queue
 import threading
 import numpy as np
 
-os.makedirs("./Database/Data", exist_ok=True)
-
 class TeensySocketThread(QThread):
     first_connection_done = False
     zeroed = False

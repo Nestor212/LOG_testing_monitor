@@ -8,7 +8,7 @@ import sys
 def get_db_path():
     if getattr(sys, 'frozen', False):
         # PyInstaller executable
-        base_dir = os.path.expanduser("~/.LOG_testing_monitor")
+        base_dir = os.path.expanduser("~/Documents/LOG_testing_monitor/LOG_TestMonitorGUI_PyQt5/Database/Data")
     else:
         # Running from source
         base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Data")

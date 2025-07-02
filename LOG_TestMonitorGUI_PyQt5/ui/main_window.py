@@ -223,6 +223,7 @@ class MainWindow(QMainWindow):
             base_dir = os.path.dirname(os.path.abspath(__file__))
 
         self.sps_log_path = os.path.join(base_dir, "..", "Database", log_file)
+        
         with open(self.sps_log_path, 'a', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(["Timestamp", "LC_SPS", "Accel_SPS"])

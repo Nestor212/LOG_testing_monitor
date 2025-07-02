@@ -14,7 +14,6 @@
 # y = 0
 
 import collections
-import numpy as np
 import matplotlib.dates as mdates
 
 from PyQt5.QtWidgets import (
@@ -25,7 +24,6 @@ from PyQt5.QtCore import QDateTime, QTimer, QThread
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas, NavigationToolbar2QT as NavigationToolbar
 from ui.sql_worker import SqlWorker
-
 
 import matplotlib.ticker as ticker
 
