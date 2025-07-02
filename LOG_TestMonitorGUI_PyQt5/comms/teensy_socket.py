@@ -239,16 +239,16 @@ class TeensySocketThread(QThread):
             accel_stale = fields[11] == '1'
             accels = list(map(float, fields[8:11])) if accel_on and not accel_stale else []
 
-
+            # Update buffer for logging data to db
             if accels:
                 adjusted_accels = [a - offset for a, offset in zip(accels, self.accel_offset)]
                 self.last_valid_accels = adjusted_accels
-                self.accel_buffer.append([timestamp_str] + adjusted_accels)
+                rounded_accels = [round(l, 4) for l in adjusted_accels]
+                self.accel_buffer.append([timestamp_str] + rounded_accels)
 
             adjusted_loads = [l - offset - zero_load for l, offset, zero_load in zip(loads, self.load_offsets, self.lc_zero_load_offset)]
-
-            # Update buffer for logging data to db
-            self.load_buffer.append((timestamp, *adjusted_loads))
+            rounded_loads = [round(l, 4) for l in adjusted_loads]
+            self.load_buffer.append((timestamp, *rounded_loads))
 
             # Update average buffers for UI displau
             self.avg_load_buffer.append(adjusted_loads)
