@@ -108,7 +108,10 @@ class DataExportDialog(QDialog):
             QMessageBox.critical(self, "Export Failed", f"❌ Error: {e}")
 
     def export_table(self, table, columns, start_time, end_time, filename):
-        db_path = os.path.join(os.path.dirname(__file__), "Data", "data_log.db")
+        db_dir = os.path.join(os.path.dirname(__file__), "Data")
+        os.makedirs(db_dir, exist_ok=True)
+        db_path = os.path.join(db_dir, "data_log.db")
+        
         conn = sqlite3.connect(db_path, detect_types=sqlite3.PARSE_DECLTYPES)
         cursor = conn.cursor()
         cursor.execute(f"""
