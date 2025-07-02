@@ -15,6 +15,9 @@ import numpy as np
 os.makedirs("./Database/Data", exist_ok=True)
 
 class TeensySocketThread(QThread):
+    first_connection_done = False
+    zeroed = False
+    
     def __init__(self, host, port, emitter: ParserEmitter):
         super().__init__()
         self.host = host
@@ -47,18 +50,53 @@ class TeensySocketThread(QThread):
         self.last_flush = time.time()
 
         self.lc_zero_load_offset = [1.6378,	8.8097,	-6.3057, 1.1999, 1.2814, -0.0209]
-        self.load_offsets = [0.0] * 6
+
+        if not TeensySocketThread.first_connection_done or not TeensySocketThread.zeroed:
+            print("🔌 First connection detected, initializing zero offsets.", flush=True)
+            self.load_offsets = [0.0] * 6
+            self.zero_pending = {"loads": True, "accels": True}
+            TeensySocketThread.first_connection_done = True
+        else:
+            print("🔌 Subsequent connection detected, fetching latest zero offsets from DB.", flush=True)
+            self.load_offsets = self.fetch_latest_load_offsets_from_db()
+            print(f"🔌 Loaded offsets: {self.load_offsets}", flush=True)
+            self.zero_pending = {"loads": False, "accels": False}
+
         self.accel_offset = [0.0, 0.0, 0.0]
-        self.zero_pending = {"loads": True, "accels": True}
 
         self.db_queue = Queue()
         self._db_writer_thread = threading.Thread(target=self._db_writer_loop, daemon=True)
         self._db_writer_thread.start()
 
+    def fetch_latest_load_offsets_from_db(self):
+        try:
+            conn = get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT lc1_offset, lc2_offset, lc3_offset, lc4_offset, lc5_offset, lc6_offset
+                FROM load_cell_zero_offsets
+                ORDER BY timestamp DESC
+                LIMIT 1
+            """)
+            row = cursor.fetchone()
+            conn.close()
+
+            if row:
+                return list(row)
+            else:
+                print("⚠ No load cell zero offsets found in DB, using zeros.")
+                return [0.0] * 6
+        except Exception as e:
+            print(f"⚠ DB error fetching load offsets: {e}")
+            return [0.0] * 6
+
     def zero_loads(self):
+        TeensySocketThread.zeroed = True
         if self.latest_data:
             _, loads, *_ = self.latest_data
-            self.load_offsets = loads[:]
+            self.load_offsets = [
+                load + offset for load, offset in zip(loads, self.load_offsets)
+            ]
             self.zero_pending["loads"] = True
             print(f"🔧 Zeroed load cells: {self.load_offsets}")
 

@@ -186,7 +186,6 @@ class MainWindow(QMainWindow):
         net_force_grid.addWidget(self.net_force_labels["Fz"])
         net_force_grid.addWidget(self.total_force_label)
 
-
         net_force_title = QLabel("Net Forces (lbf)")
         net_force_title.setFont(QFont("Arial", 16, QFont.Bold))
         net_force_title.setAlignment(Qt.AlignCenter)
@@ -265,6 +264,7 @@ class MainWindow(QMainWindow):
                 return
             self.update_led("yellow")
             self.socket_thread = TeensySocketThread(ip, 5000, self.signal_emitter)
+            self.initUI = False
             self.socket_thread.start()
             self.connect_btn.setText("Disconnect")
             self.update_led("green")
