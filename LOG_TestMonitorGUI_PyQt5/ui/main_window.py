@@ -13,6 +13,7 @@ from Database.export_data import DataExportDialog as Data
 import csv
 import os
 import datetime
+import sys
 
 def format_force(value, axis):
     if axis == "X":
@@ -161,9 +162,8 @@ class MainWindow(QMainWindow):
         zero_grid.addWidget(self.zero_lc_btn, 0, 0)
         zero_grid.addWidget(self.zero_accel_btn, 0, 1)
         zero_grid.addWidget(self.plot_btn, 0, 2)
-        # zero_grid.addWidget(self.moment_map_btn, 0, 3)
         zero_grid.addWidget(self.export_data_btn, 0, 3)
-
+        # zero_grid.addWidget(self.moment_map_btn, 0, 4)
 
         legend = QLabel("Arrows indicate direction of applied force. X: ←→ , Y: ↑↓ , Z: ▼ (down) ▲ (up)")
         legend.setAlignment(Qt.AlignCenter)
@@ -208,7 +208,14 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(container)
 
         log_file = f"lc_sps_log_{datetime.date.today().isoformat()}.csv"
-        base_dir = os.path.dirname(os.path.abspath(__file__))
+
+        if getattr(sys, 'frozen', False):
+            # Running as PyInstaller bundle
+            base_dir = os.path.dirname(sys.executable)
+        else:
+            # Running as script
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+
         self.sps_log_path = os.path.join(base_dir, "..", "Database", log_file)
         with open(self.sps_log_path, 'a', newline='') as f:
             writer = csv.writer(f)
@@ -318,7 +325,6 @@ class MainWindow(QMainWindow):
         #         moment_map_forces["Fy"],
         #         moment_map_forces["Fz"]
         #     )
-
 
     def update_sps_display(self, lc_sps, accel_sps):
         self.lc_sps_label.setText(f"LC SPS: {lc_sps}")

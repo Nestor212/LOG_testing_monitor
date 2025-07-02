@@ -4,6 +4,7 @@ import datetime
 import threading
 import os
 import csv
+import sys
 from PyQt5.QtCore import QThread
 from comms.parser_emitter import ParserEmitter
 from Database.db import get_connection  # Ensure this is at the top of your file
@@ -30,7 +31,13 @@ class TeensySocketThread(QThread):
         self.avg_accel_on = False
         self.avg_accel_stale = False
 
-        base_dir = os.path.dirname(os.path.abspath(__file__))
+        if getattr(sys, 'frozen', False):
+            # Running as PyInstaller bundle
+            base_dir = os.path.dirname(sys.executable)
+        else:
+            # Running as script
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+
         self.data_dir = os.path.join(base_dir, "..", "Database", "Data")
         os.makedirs(self.data_dir, exist_ok=True)
 
