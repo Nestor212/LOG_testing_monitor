@@ -6,7 +6,6 @@ import sys
 
 def get_db_path():
     base_dir = os.path.expanduser("~/Documents/LOG_testing_monitor/LOG_TestMonitorGUI_PyQt5/Database/Data")
-    os.makedirs(base_dir, exist_ok=True)
     return os.path.join(base_dir, "data_log.db")
 
 def get_connection():
