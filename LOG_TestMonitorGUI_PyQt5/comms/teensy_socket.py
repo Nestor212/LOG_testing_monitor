@@ -90,23 +90,36 @@ class TeensySocketThread(QThread):
             print(f"⚠ DB error fetching load offsets: {e}")
             return [0.0] * 6
 
-    def zero_loads(self):
-        TeensySocketThread.zeroed = True
-        if self.latest_data:
-            _, loads, *_ = self.latest_data
-            self.load_offsets = [
-                load + offset for load, offset in zip(loads, self.load_offsets)
-            ]
+    def zero_loads(self, zeroing=False):
+        if zeroing:
+            TeensySocketThread.zeroed = True
+            if self.latest_data:
+                _, loads, *_ = self.latest_data
+                self.load_offsets = [
+                    load + offset for load, offset in zip(loads, self.load_offsets)
+                ]
+                self.zero_pending["loads"] = True
+                print(f"🔧 Zeroed load cells: {self.load_offsets}")
+        else:
+            # Clear load offsets without zeroing
+            TeensySocketThread.zeroed = True
+            self.load_offsets = [0.0] * 6
             self.zero_pending["loads"] = True
-            print(f"🔧 Zeroed load cells: {self.load_offsets}")
+            print("🔧 Cleared load cell offsets.")
 
-    def zero_accels(self):
-        if self.latest_data:
-            _, _, accels, accel_on, accel_stale = self.latest_data
-            if accel_on and not accel_stale:
-                self.accel_offset = accels[:]
-                self.zero_pending["accels"] = True
-                print(f"🔧 Zeroed accelerometer: {self.accel_offset}")
+    def zero_accels(self, zeroing=False):
+        if zeroing:
+            if self.latest_data:
+                _, _, accels, accel_on, accel_stale = self.latest_data
+                if accel_on and not accel_stale:
+                    self.accel_offset = accels[:]
+                    self.zero_pending["accels"] = True
+                    print(f"🔧 Zeroed accelerometer: {self.accel_offset}")
+        else:
+            # Clear accelerometer offsets without zeroing
+            self.accel_offset = [0.0, 0.0, 0.0]
+            self.zero_pending["accels"] = True
+            print("🔧 Cleared accelerometer offsets.")
 
     def emit_loop(self):
         while self.running:

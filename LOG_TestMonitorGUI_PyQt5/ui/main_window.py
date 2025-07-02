@@ -1,6 +1,7 @@
 from PyQt5.QtWidgets import (
     QMainWindow, QLabel, QPushButton, QLineEdit,
-    QVBoxLayout, QHBoxLayout, QWidget, QGridLayout, QFrame, QSizePolicy
+    QVBoxLayout, QHBoxLayout, QWidget, QGridLayout, 
+    QFrame, QSizePolicy, QMessageBox
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont, QColor, QPalette
@@ -145,9 +146,13 @@ class MainWindow(QMainWindow):
 
         self.zero_lc_btn = QPushButton("Zero Loads")
         self.zero_lc_btn.clicked.connect(self.zero_loads)
+        self.clear_zero_lc_btn = QPushButton("Clear Load Offsets")
+        self.clear_zero_lc_btn.clicked.connect(self.clear_load_offsets)
 
         self.zero_accel_btn = QPushButton("Zero Accels")
         self.zero_accel_btn.clicked.connect(self.zero_accels)
+        self.clear_zero_accel_btn = QPushButton("Clear Accel Offsets")
+        self.clear_zero_accel_btn.clicked.connect(self.clear_accel_offsets)
 
         self.plot_btn = QPushButton("Open Plotter")
         self.plot_btn.clicked.connect(self.show_plot_window)
@@ -160,9 +165,11 @@ class MainWindow(QMainWindow):
 
         zero_grid = QGridLayout()
         zero_grid.addWidget(self.zero_lc_btn, 0, 0)
-        zero_grid.addWidget(self.zero_accel_btn, 0, 1)
-        zero_grid.addWidget(self.plot_btn, 0, 2)
-        zero_grid.addWidget(self.export_data_btn, 0, 3)
+        zero_grid.addWidget(self.clear_zero_lc_btn, 0, 1)
+        zero_grid.addWidget(self.zero_accel_btn, 0, 2)
+        zero_grid.addWidget(self.clear_zero_accel_btn, 0, 3)
+        zero_grid.addWidget(self.plot_btn, 1, 1)
+        zero_grid.addWidget(self.export_data_btn, 1, 2)
         # zero_grid.addWidget(self.moment_map_btn, 0, 4)
 
         legend = QLabel("Arrows indicate direction of applied force. X: ←→ , Y: ↑↓ , Z: ▼ (down) ▲ (up)")
@@ -234,13 +241,36 @@ class MainWindow(QMainWindow):
         self.plot_window.show()
 
     def zero_loads(self):
-        print("Zeroing loads...")
         if self.socket_thread:
-            self.socket_thread.zero_loads()
+            reply = QMessageBox.question(self, "Confirm Zero Loads",
+                                        "Are you sure you want to zero the load cells?\nThis will set the current values as offsets.",
+                                        QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply == QMessageBox.Yes:
+                self.socket_thread.zero_loads(True)
+
+    def clear_load_offsets(self):
+        if self.socket_thread:
+            reply = QMessageBox.question(self, "Confirm Clear Load Offsets",
+                                        "Are you sure you want to clear the load cell offsets?\nThis will remove all zeroing.",
+                                        QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply == QMessageBox.Yes:
+                self.socket_thread.zero_loads(False)
 
     def zero_accels(self):
         if self.socket_thread:
-            self.socket_thread.zero_accels()
+            reply = QMessageBox.question(self, "Confirm Zero Accels",
+                                        "Are you sure you want to zero the accelerometers?\nThis will set the current values as offsets.",
+                                        QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply == QMessageBox.Yes:
+                self.socket_thread.zero_accels(True)
+
+    def clear_accel_offsets(self):
+        if self.socket_thread:
+            reply = QMessageBox.question(self, "Confirm Clear Accel Offsets",
+                                        "Are you sure you want to clear the accel offsets?\nThis will remove all zeroing.",
+                                        QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply == QMessageBox.Yes:
+                self.socket_thread.zero_accels(False)
 
     def update_time(self):
         current_time = QTime.currentTime().toString("HH:mm:ss")
