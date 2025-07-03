@@ -124,22 +124,26 @@ if __name__ == "__main__":
 
     base = f"{start.strftime('%Y-%m-%d_%H-%M-%S')}_to_{end.strftime('%Y-%m-%d_%H-%M-%S')}"
 
-    if export_load:
-        export_table("load_cells",
-                     ["timestamp", "lc1", "lc2", "lc3", "lc4", "lc5", "lc6"],
-                     start, end, output_folder, f"load_cells_{base}.csv")
+    try: 
+        if export_load:
+            export_table("load_cells",
+                        ["timestamp", "lc1", "lc2", "lc3", "lc4", "lc5", "lc6"],
+                        start, end, output_folder, f"load_cells_{base}.csv")
 
-    if export_accel:
-        export_table("accelerometer",
-                     ["timestamp", "ax", "ay", "az"],
-                     start, end, output_folder, f"accelerometer_{base}.csv")
+        if export_accel:
+            export_table("accelerometer",
+                        ["timestamp", "ax", "ay", "az"],
+                        start, end, output_folder, f"accelerometer_{base}.csv")
 
-    if export_lc_offsets:
-        export_table("load_cell_zero_offsets",
-                     ["timestamp", "lc1_offset", "lc2_offset", "lc3_offset", "lc4_offset", "lc5_offset", "lc6_offset"],
-                     start, end, output_folder, f"load_cell_zero_offsets_{base}.csv")
+        if export_lc_offsets:
+            export_table("load_cell_zero_offsets",
+                        ["timestamp", "lc1_offset", "lc2_offset", "lc3_offset", "lc4_offset", "lc5_offset", "lc6_offset"],
+                        start, end, output_folder, f"load_cell_zero_offsets_{base}.csv")
 
-    if export_accel_offsets:
-        export_table("accelerometer_zero_offsets",
-                     ["timestamp", "ax_offset", "ay_offset", "az_offset"],
-                     start, end, output_folder, f"accelerometer_zero_offsets_{base}.csv")
+        if export_accel_offsets:
+            export_table("accelerometer_zero_offsets",
+                        ["timestamp", "ax_offset", "ay_offset", "az_offset"],
+                        start, end, output_folder, f"accelerometer_zero_offsets_{base}.csv")
+    except Exception as e:
+        print(f"❌ Error during export: {e}")
+        sys.exit(1)
