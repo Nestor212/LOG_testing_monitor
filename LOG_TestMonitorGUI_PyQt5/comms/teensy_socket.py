@@ -25,12 +25,12 @@ class TeensySocketThread(QThread):
         self.emitter = emitter
         self.last_emit_time = time.time()
         self.latest_data = None
-
         self.emit_interval = 0.25  # 20 Hz
         self.avg_load_buffer = []
         self.avg_accel_buffer = []
         self.avg_accel_on = False
         self.avg_accel_stale = False
+        self.last_read_time = time.time()
 
         if getattr(sys, 'frozen', False):
             # Running as PyInstaller bundle
@@ -50,9 +50,9 @@ class TeensySocketThread(QThread):
         self.lc_zero_load_offset = [1.6378,	8.8097,	-6.3057, 1.1999, 1.2814, -0.0209]
 
         if not TeensySocketThread.first_connection_done or not TeensySocketThread.zeroed:
-            print("🔌 First connection detected, initializing zero offsets.", flush=True)
+            # print("🔌 First connection detected, initializing zero offsets.", flush=True)
             self.load_offsets = [0.0] * 6
-            self.zero_pending = {"loads": True, "accels": True}
+            self.zero_pending = {"loads": False, "accels": False}
             TeensySocketThread.first_connection_done = True
         else:
             print("🔌 Subsequent connection detected, fetching latest zero offsets from DB.", flush=True)
@@ -65,6 +65,13 @@ class TeensySocketThread(QThread):
         self.db_queue = Queue()
         self._db_writer_thread = threading.Thread(target=self._db_writer_loop, daemon=True)
         self._db_writer_thread.start()
+
+    def load_last_offsets(self):
+        """Load the last stored offsets from the database."""
+        self.load_offsets = self.fetch_latest_load_offsets_from_db()
+        print(f"🔌 Loaded offsets from DB: {self.load_offsets}", flush=True)
+        self.zero_pending["loads"] = False
+        TeensySocketThread.zeroed = True  # Mark as zeroed to avoid re-zeroing on next connection
 
     def fetch_latest_load_offsets_from_db(self):
         try:
@@ -100,9 +107,9 @@ class TeensySocketThread(QThread):
                 print(f"🔧 Zeroed load cells: {self.load_offsets}")
         else:
             # Clear load offsets without zeroing
-            TeensySocketThread.zeroed = True
+            TeensySocketThread.zeroed = False
             self.load_offsets = [0.0] * 6
-            self.zero_pending["loads"] = True
+            self.zero_pending["loads"] = False
             print("🔧 Cleared load cell offsets.")
 
     def zero_accels(self, zeroing=False):
@@ -116,7 +123,7 @@ class TeensySocketThread(QThread):
         else:
             # Clear accelerometer offsets without zeroing
             self.accel_offset = [0.0, 0.0, 0.0]
-            self.zero_pending["accels"] = True
+            self.zero_pending["accels"] = False
             print("🔧 Cleared accelerometer offsets.")
 
     def emit_loop(self):
@@ -177,8 +184,12 @@ class TeensySocketThread(QThread):
                 self.sync_time()
 
                 while self.running:
+                    if time.time() - self.last_read_time > 0.1:
+                        print(F"Elapsed time since last read: {time.time() - self.last_read_time:.2f} seconds", flush=True)
+                    
+                    self.last_read_time = time.time()
                     try:
-                        chunk = self.s.recv(4096).decode(errors='ignore')
+                        chunk = self.s.recv(2048).decode(errors='ignore')
                         # print(f"chunk: {chunk}", flush=True)
                         if not chunk:
                             break

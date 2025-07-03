@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import (
     QMainWindow, QLabel, QPushButton, QLineEdit,
     QVBoxLayout, QHBoxLayout, QWidget, QGridLayout, 
-    QFrame, QSizePolicy, QMessageBox
+    QFrame, QSizePolicy, QMessageBox, QCheckBox
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont, QColor, QPalette
@@ -135,12 +135,17 @@ class MainWindow(QMainWindow):
         self.status_led.setFixedSize(20, 20)
         self.update_led("red")
 
+        self.load_offsets_checkbox = QCheckBox("Load Last Stored Offsets")
+        self.load_offsets_checkbox.setChecked(False)
+        # self.load_offsets_checkbox.toggled.connect(self.toggle_load_offsets_db_load)
+
         conn_layout = QHBoxLayout()
         conn_layout.addWidget(QLabel("IP:"))
         conn_layout.addWidget(self.ip_input)
         conn_layout.addWidget(self.connect_btn)
         conn_layout.addWidget(QLabel("Status:"))
         conn_layout.addWidget(self.status_led)
+        conn_layout.addWidget(self.load_offsets_checkbox)
         conn_layout.addStretch(1)
         conn_layout.addWidget(self.clock_label)
 
@@ -223,7 +228,7 @@ class MainWindow(QMainWindow):
             base_dir = os.path.dirname(os.path.abspath(__file__))
 
         self.sps_log_path = os.path.join(base_dir, "..", "Database", log_file)
-        
+
         with open(self.sps_log_path, 'a', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(["Timestamp", "LC_SPS", "Accel_SPS"])
@@ -232,6 +237,10 @@ class MainWindow(QMainWindow):
     #     self.moment_map_window.show()
     #     self.moment_map_window.raise_()
     #     self.moment_map_window.activateWindow()
+    # def toggle_load_offsets_db_load(self, checked):
+    #     if self.socket_thread:
+    #         if checked:
+    #             self.socket_thread.load_last_offsets()
 
     def show_export_data_window(self):
         self.export_data_window.show()
@@ -299,6 +308,8 @@ class MainWindow(QMainWindow):
             self.socket_thread.start()
             self.connect_btn.setText("Disconnect")
             self.update_led("green")
+            if self.load_offsets_checkbox.isChecked():
+                self.socket_thread.load_last_offsets()
 
     def update_accel_led(self, color):
         palette = self.accel_led.palette()
