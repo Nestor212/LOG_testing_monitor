@@ -64,7 +64,7 @@ class MainWindow(QMainWindow):
         frame.setFrameStyle(QFrame.Panel | QFrame.Raised)
         frame.setLineWidth(3)
         frame.setLayout(grid)
-        frame.setFixedSize(560, 320)
+        frame.setFixedSize(420, 240)
 
         # Force Labels and SPS
         self.forces_title = QLabel("Forces (lbf)")
@@ -180,27 +180,49 @@ class MainWindow(QMainWindow):
         legend = QLabel("Arrows indicate direction of applied force. X: ←→ , Y: ↑↓ , Z: ▼ (down) ▲ (up)")
         legend.setAlignment(Qt.AlignCenter)
 
-        # Net force labels
+        # Initialize net_force_labels dict
         self.net_force_labels = {}
-        for axis in ["Fx", "Fy", "Fz"]:
-            lbl = QLabel(f"{axis}: ---")
+
+        # Helper to create consistent labels
+        def make_label(text):
+            lbl = QLabel(text)
             lbl.setFont(QFont("Arial", 14))
             lbl.setAlignment(Qt.AlignCenter)
-            self.net_force_labels[axis] = lbl
+            lbl.setFrameStyle(QFrame.Panel | QFrame.Sunken)
+            return lbl
 
-        self.total_force_label = QLabel("Total: --- lbf")
-        self.total_force_label.setFont(QFont("Arial", 14))
-        self.total_force_label.setAlignment(Qt.AlignCenter)
+        # Create force value labels
+        self.net_force_labels['Fx'] = make_label("Fx: ---")
+        self.net_force_labels['Fy'] = make_label("Fy: ---")
+        self.net_force_labels['Fz'] = make_label("Fz: ---")
+        self.net_force_labels['Fy_abs_sum'] = make_label("Total Y Reaction: ---")
+        self.net_force_labels['Moment_X'] = make_label("Moment X: --- lbf-in")
+        self.net_force_labels['Moment_Y'] = make_label("Moment Y: --- lbf-in")
+        self.total_force_label = make_label("Vector Magnitude: --- lbf")
 
-        net_force_grid = QHBoxLayout()
-        net_force_grid.addWidget(self.net_force_labels["Fx"])
-        net_force_grid.addWidget(self.net_force_labels["Fy"])
-        net_force_grid.addWidget(self.net_force_labels["Fz"])
-        net_force_grid.addWidget(self.total_force_label)
+        # Create grid layout
+        net_force_grid = QGridLayout()
 
-        net_force_title = QLabel("Net Forces (lbf)")
+        # Title
+        net_force_title = QLabel("Load Cell Forces and Moments")
         net_force_title.setFont(QFont("Arial", 16, QFont.Bold))
         net_force_title.setAlignment(Qt.AlignCenter)
+        net_force_grid.addWidget(net_force_title, 0, 0, 1, 3)
+        net_force_grid.setVerticalSpacing(2)
+        net_force_grid.setContentsMargins(0, 0, 0, 0)
+
+        # First row: Fx, Fy, Fz
+        net_force_grid.addWidget(self.net_force_labels['Fx'], 1, 0)
+        net_force_grid.addWidget(self.net_force_labels['Fy'], 1, 1)
+        net_force_grid.addWidget(self.net_force_labels['Fz'], 1, 2)
+        
+        # Seconf row:
+        net_force_grid.addWidget(self.total_force_label,      2, 0,1, 3)
+
+        # Second row: Sum Fz, Net Fy, Total Y Reaction
+        net_force_grid.addWidget(self.net_force_labels['Moment_X']  , 3, 0)
+        net_force_grid.addWidget(self.net_force_labels['Moment_Y']  , 3, 1)
+        net_force_grid.addWidget(self.net_force_labels['Fy_abs_sum'], 3, 2)
 
         # Main Layout
         main_layout = QVBoxLayout()
@@ -208,7 +230,6 @@ class MainWindow(QMainWindow):
         main_layout.addLayout(forces_header_layout)
         main_layout.addWidget(frame, alignment=Qt.AlignCenter)
         main_layout.addWidget(legend)
-        main_layout.addWidget(net_force_title)
         main_layout.addLayout(net_force_grid)
         main_layout.addLayout(accel_header_layout)
         main_layout.addLayout(accel_grid)
@@ -351,14 +372,55 @@ class MainWindow(QMainWindow):
         moment_map_forces = {}
         total_force = 0
 
+        # Constants
+        Y2 = 4.67
+        Y4 = -4.67
+        X6 = 14.67
+
+        # Initialize
+        fz_sum = 0
+        fy_net = 0
+        moment_x = 0
+        moment_y = 0
+        fx_value = 0
+
         for label_key, (indices, axis_for_arrow) in force_map.items():
             vals = [loads[i] for i in indices]
             net_force = sum(vals)
-            total_force += abs(net_force)  # or net_force if you want algebraic sum
-            self.net_force_labels[label_key].setText(f"{label_key}: {format_force(net_force, axis_for_arrow)} lbf")
-            moment_map_forces[label_key] = vals
 
-        self.total_force_label.setText(f"Total: {total_force:.1f} lbf")
+            if label_key == 'Fz':
+                fz_sum = net_force  # sum of all Fz values
+            elif label_key == 'Fy':
+                fy_net = net_force  # sum of Fy (signed net Y force)
+                # Compute moment about X from Y rods
+                moment_x = loads[1] * Y2 + loads[3] * Y4
+            elif label_key == 'Fx':
+                fx_value = net_force
+                moment_y = fx_value * X6
+
+            self.net_force_labels[label_key].setText(
+                f"{label_key}: {format_force(net_force, axis_for_arrow)} lbf"
+            )
+        import math
+
+        vector_magnitude = math.sqrt(fx_value**2 + fy_net**2 + fz_sum**2)
+
+        # After loop display
+        self.total_force_label.setText(f"Vector Magnitude: {vector_magnitude:.2f} lbf")
+        self.net_force_labels['Fy_abs_sum'].setText(f"Total Y Reaction: {abs(loads[1]) + abs(loads[3]):.2f} lbf")
+        self.net_force_labels['Moment_X'].setText(f"Moment X: {moment_x:.2f} lbf-in")
+        self.net_force_labels['Moment_Y'].setText(f"Moment Y: {moment_y:.2f} lbf-in")
+
+
+
+        # for label_key, (indices, axis_for_arrow) in force_map.items():
+        #     vals = [loads[i] for i in indices]
+        #     net_force = sum(vals)
+        #     total_force += abs(net_force)  # or net_force if you want algebraic sum
+        #     self.net_force_labels[label_key].setText(f"{label_key}: {format_force(net_force, axis_for_arrow)} lbf")
+            # moment_map_forces[label_key] = vals
+
+        # self.total_force_label.setText(f"Total: {total_force:.1f} lbf")
 
         # # Update moment map
         # if self.moment_map_window and self.moment_map_window.isVisible():
