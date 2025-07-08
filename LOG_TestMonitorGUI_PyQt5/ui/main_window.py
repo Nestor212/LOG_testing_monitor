@@ -31,7 +31,8 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Force Display — Teensy Monitor")
         self.setGeometry(100, 100, 800, 550)
 
-        self.plot_window = PlotWindow()
+        self.plot_windows = []
+        # self.plot_window = PlotWindow()
         # self.moment_map_window = MomentMapWidget()
         self.export_data_window = Data()
 
@@ -162,9 +163,6 @@ class MainWindow(QMainWindow):
         self.plot_btn = QPushButton("Open Plotter")
         self.plot_btn.clicked.connect(self.show_plot_window)
 
-        # self.moment_map_btn = QPushButton("Open Moment Map")
-        # self.moment_map_btn.clicked.connect(self.show_moment_map_window)
-
         self.export_data_btn = QPushButton("Export Data")
         self.export_data_btn.clicked.connect(self.show_export_data_window)
 
@@ -175,7 +173,6 @@ class MainWindow(QMainWindow):
         zero_grid.addWidget(self.clear_zero_accel_btn, 0, 3)
         zero_grid.addWidget(self.plot_btn, 1, 1)
         zero_grid.addWidget(self.export_data_btn, 1, 2)
-        # zero_grid.addWidget(self.moment_map_btn, 0, 4)
 
         legend = QLabel("Arrows indicate direction of applied force. X: ←→ , Y: ↑↓ , Z: ▼ (down) ▲ (up)")
         legend.setAlignment(Qt.AlignCenter)
@@ -195,9 +192,9 @@ class MainWindow(QMainWindow):
         self.net_force_labels['Fx'] = make_label("Fx: ---")
         self.net_force_labels['Fy'] = make_label("Fy: ---")
         self.net_force_labels['Fz'] = make_label("Fz: ---")
-        self.net_force_labels['Fy_abs_sum'] = make_label("Total Y Reaction: ---")
         self.net_force_labels['Moment_X'] = make_label("Moment X: --- lbf-in")
         self.net_force_labels['Moment_Y'] = make_label("Moment Y: --- lbf-in")
+        self.net_force_labels['Moment_Z'] = make_label("Moment Z: --- lbf-in")
         self.total_force_label = make_label("Vector Magnitude: --- lbf")
 
         # Create grid layout
@@ -222,7 +219,7 @@ class MainWindow(QMainWindow):
         # Second row: Sum Fz, Net Fy, Total Y Reaction
         net_force_grid.addWidget(self.net_force_labels['Moment_X']  , 3, 0)
         net_force_grid.addWidget(self.net_force_labels['Moment_Y']  , 3, 1)
-        net_force_grid.addWidget(self.net_force_labels['Fy_abs_sum'], 3, 2)
+        net_force_grid.addWidget(self.net_force_labels['Moment_Z'], 3, 2)
 
         # Main Layout
         main_layout = QVBoxLayout()
@@ -254,22 +251,15 @@ class MainWindow(QMainWindow):
             writer = csv.writer(f)
             writer.writerow(["Timestamp", "LC_SPS", "Accel_SPS"])
 
-    # def show_moment_map_window(self):
-    #     self.moment_map_window.show()
-    #     self.moment_map_window.raise_()
-    #     self.moment_map_window.activateWindow()
-    # def toggle_load_offsets_db_load(self, checked):
-    #     if self.socket_thread:
-    #         if checked:
-    #             self.socket_thread.load_last_offsets()
+    def show_plot_window(self):
+        plot_window = PlotWindow()
+        self.plot_windows.append(plot_window)
+        plot_window.show()
 
     def show_export_data_window(self):
         self.export_data_window.show()
         self.export_data_window.raise_()
         self.export_data_window.activateWindow()
-
-    def show_plot_window(self):
-        self.plot_window.show()
 
     def zero_loads(self):
         if self.socket_thread:
@@ -338,6 +328,32 @@ class MainWindow(QMainWindow):
         self.accel_led.setAutoFillBackground(True)
         self.accel_led.setPalette(palette)
 
+    def compute_moments_from_loads(self, loads):
+        """
+        Compute Mx, My, and Mz from raw load cell force readings.
+        Positive directions:
+            - Fx: right
+            - Fy: down
+            - Fz: down
+        """
+        positions = {
+            0: (-13, -7),  # LC1 (Fz)
+            1: (-10,  4),  # LC2 (Fy)
+            2: (0,    7),  # LC3 (Fz)
+            3: (10,   4),  # LC4 (Fy)
+            4: (13,  -7),  # LC5 (Fz)
+            5: (0,    0),  # LC6 (Fx)
+        }
+
+        # Mx: Fy from LC2, LC4
+        mx = loads[1] * positions[1][0] + loads[3] * positions[3][0]
+        # My: Fz from LC1, LC5
+        my = loads[0] * positions[0][1] + loads[4] * positions[4][1]
+        # Mz: cross product from Fy × x
+        mz = loads[1] * positions[1][0] + loads[3] * positions[3][0]
+
+        return mx, my, mz
+
     def update_display(self, timestamp, loads, accels, accel_on, accel_status):
         axis_map = {
             "LC1": "Z", "LC2": "Y", "LC3": "Z",
@@ -349,86 +365,49 @@ class MainWindow(QMainWindow):
             force_val = loads[i]
             self.labels[lc].setText(f"{lc}:\n {format_force(force_val, axis)}")
 
-        # Acceleration LED status
-            accel_color = "green" if accel_on else "red"
-            self.update_accel_led(accel_color)
+        # Acceleration LED and values
+        accel_color = "green" if accel_on else "red"
+        self.update_accel_led(accel_color)
 
-            # Acceleration display
-            if accel_on:
-                self.accel_title.setText("Acceleration (g)")
-                for i, axis in enumerate(["X", "Y", "Z"]):
-                    self.accel_labels[axis].setText(f"{axis}: {accels[i]:+.2f} g")
-            else:
-                self.accel_title.setText("Acceleration (Unavailable)")
-                for axis in ["X", "Y", "Z"]:
-                    self.accel_labels[axis].setText(f"{axis}: ---")
+        if accel_on:
+            self.accel_title.setText("Acceleration (g)")
+            for i, axis in enumerate(["X", "Y", "Z"]):
+                self.accel_labels[axis].setText(f"{axis}: {accels[i]:+.2f} g")
+        else:
+            self.accel_title.setText("Acceleration (Unavailable)")
+            for axis in ["X", "Y", "Z"]:
+                self.accel_labels[axis].setText(f"{axis}: ---")
 
+        # Force breakdown
         force_map = {
             "Fx": ([5], "X"),
             "Fy": ([1, 3], "Y"),
             "Fz": ([0, 2, 4], "Z")
         }
 
-        moment_map_forces = {}
-        total_force = 0
-
-        # Constants
-        Y2 = 4.67
-        Y4 = -4.67
-        X6 = 14.67
-
-        # Initialize
-        fz_sum = 0
-        fy_net = 0
-        moment_x = 0
-        moment_y = 0
-        fx_value = 0
+        fx_value = sum(loads[i] for i in force_map["Fx"][0])
+        fy_net = sum(loads[i] for i in force_map["Fy"][0])
+        fz_sum = sum(loads[i] for i in force_map["Fz"][0])
 
         for label_key, (indices, axis_for_arrow) in force_map.items():
             vals = [loads[i] for i in indices]
             net_force = sum(vals)
-
-            if label_key == 'Fz':
-                fz_sum = net_force  # sum of all Fz values
-            elif label_key == 'Fy':
-                fy_net = net_force  # sum of Fy (signed net Y force)
-                # Compute moment about X from Y rods
-                moment_x = loads[1] * Y2 + loads[3] * Y4
-            elif label_key == 'Fx':
-                fx_value = net_force
-                moment_y = fx_value * X6
-
             self.net_force_labels[label_key].setText(
                 f"{label_key}: {format_force(net_force, axis_for_arrow)} lbf"
             )
+
+        # Vector magnitude
         import math
-
         vector_magnitude = math.sqrt(fx_value**2 + fy_net**2 + fz_sum**2)
-
-        # After loop display
         self.total_force_label.setText(f"Vector Magnitude: {vector_magnitude:.2f} lbf")
+
         self.net_force_labels['Fy_abs_sum'].setText(f"Total Y Reaction: {abs(loads[1]) + abs(loads[3]):.2f} lbf")
+
+        # Compute moments from loads
+        moment_x, moment_y, moment_z = self.compute_moments_from_loads(loads)
         self.net_force_labels['Moment_X'].setText(f"Moment X: {moment_x:.2f} lbf-in")
         self.net_force_labels['Moment_Y'].setText(f"Moment Y: {moment_y:.2f} lbf-in")
-
-
-
-        # for label_key, (indices, axis_for_arrow) in force_map.items():
-        #     vals = [loads[i] for i in indices]
-        #     net_force = sum(vals)
-        #     total_force += abs(net_force)  # or net_force if you want algebraic sum
-        #     self.net_force_labels[label_key].setText(f"{label_key}: {format_force(net_force, axis_for_arrow)} lbf")
-            # moment_map_forces[label_key] = vals
-
-        # self.total_force_label.setText(f"Total: {total_force:.1f} lbf")
-
-        # # Update moment map
-        # if self.moment_map_window and self.moment_map_window.isVisible():
-        #     self.moment_map_window.update_forces(
-        #         moment_map_forces["Fx"],
-        #         moment_map_forces["Fy"],
-        #         moment_map_forces["Fz"]
-        #     )
+        self.net_force_labels['Moment_Z'].setText(f"Moment Z: {moment_z:.2f} lbf-in")
 
     def update_sps_display(self, lc_sps, accel_sps):
         self.lc_sps_label.setText(f"LC SPS: {lc_sps}")
