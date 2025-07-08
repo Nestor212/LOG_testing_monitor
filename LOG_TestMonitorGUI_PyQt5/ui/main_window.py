@@ -401,8 +401,6 @@ class MainWindow(QMainWindow):
         vector_magnitude = math.sqrt(fx_value**2 + fy_net**2 + fz_sum**2)
         self.total_force_label.setText(f"Vector Magnitude: {vector_magnitude:.2f} lbf")
 
-        self.net_force_labels['Fy_abs_sum'].setText(f"Total Y Reaction: {abs(loads[1]) + abs(loads[3]):.2f} lbf")
-
         # Compute moments from loads
         moment_x, moment_y, moment_z = self.compute_moments_from_loads(loads)
         self.net_force_labels['Moment_X'].setText(f"Moment X: {moment_x:.2f} lbf-in")

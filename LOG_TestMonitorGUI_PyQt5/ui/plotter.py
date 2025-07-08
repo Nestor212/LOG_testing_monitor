@@ -178,7 +178,7 @@ class PlotWindow(QWidget):
         if plot_data == "Fx/Fy/Fz vs Time":
             labels = ["Fx", "Fy", "Fz"]
         elif plot_data == "Mx/My/Mz vs Time":
-            labels = ["Mx", "My"]
+            labels = ["Mx", "My", "Mz"]
         elif plot_data == "All Load Cells (F1–F6) vs Time":
             labels = [f"F{i+1}" for i in range(6)]
         elif plot_data == "Axial Loads (Z: F1, F3, F5) vs Time":
@@ -258,7 +258,7 @@ class PlotWindow(QWidget):
     def refresh_plot(self):
         plot_data = self.plot_data_selector.currentText()
         plot_mode = self.plot_mode_selector.currentText()
-        smoothing_n = int(self.smoothing_selector.currentText().split()[0])
+        # smoothing_n = int(self.smoothing_selector.currentText().split()[0])
 
         # Determine which data to plot
         if plot_data == "Fx/Fy/Fz vs Time":
@@ -298,16 +298,16 @@ class PlotWindow(QWidget):
             return [sum(data[i:i+n])/n for i in range(len(data)-n+1)]
 
         time_data = list(self.x_data)
-        if smoothing_n > 1:
-            time_data = time_data[smoothing_n-1:]
+        # if smoothing_n > 1:
+        #     time_data = time_data[smoothing_n-1:]
 
         if plot_data == "Mx/My/Mz vs Time":
             labels = ["Mx", "My", "Mz"]
             moment_x, moment_y, moment_z = self.compute_moments()
 
-            moment_x = smooth(moment_x, smoothing_n)
-            moment_y = smooth(moment_y, smoothing_n)
-            moment_z = smooth(moment_z, smoothing_n)
+            # moment_x = smooth(moment_x, smoothing_n)
+            # moment_y = smooth(moment_y, smoothing_n)
+            # moment_z = smooth(moment_z, smoothing_n)
 
             if mode_number == 1:
                 self.individual_lines[0].set_data(time_data, moment_x)
@@ -347,7 +347,7 @@ class PlotWindow(QWidget):
             for i, label in enumerate(labels):
                 indices = data_indices[label]
                 vals = [sum(self.y_data[k][j] for k in indices) for j in range(len(self.x_data))]
-                vals = smooth(vals, smoothing_n)
+                # vals = smooth(vals, smoothing_n)
 
                 if mode_number == 1:
                     self.individual_lines[i].set_data(time_data, vals)
@@ -394,23 +394,15 @@ class PlotWindow(QWidget):
             self.live_timer.stop()
             self.start_btn.setText("Start")
 
-
     def toggle_live_history(self, checked):
         # Only matters if we're in live mode
         if self.live_mode:
             self.start_time_edit.setEnabled(checked)
             self.window_selector.setEnabled(not checked)
 
-    def update_live_window(self, text):
-        mapping = {
-            "1 min": 1,
-            "10 min": 10,
-            "1 hr": 60,
-            "5 hr": 300,
-            "12 hr": 720
-        }
-        self.live_window_minutes = mapping.get(text, 10)
-        self.max_live_points = self.live_window_minutes * 60 * 4  # 4 Hz
+    def update_live_window(self):
+        avg_n = int(self.smoothing_selector.currentText().split()[0])
+        self.max_live_points = self.live_window_minutes * 60 * avg_n  # 4 Hz
 
     def toggle_live_plotting(self):
         if self.live_timer.isActive():
@@ -446,17 +438,12 @@ class PlotWindow(QWidget):
         for i in range(6):
             self.y_data[i].append(values[i])
 
-        # if self.moment_widget:
-        #     fx_vals = [self.y_data[5][-1]] if self.y_data[5] else [0]
-        #     fy_vals = [self.y_data[1][-1], self.y_data[3][-1]] if self.y_data[1] and self.y_data[3] else [0, 0]
-        #     fz_vals = [self.y_data[0][-1], self.y_data[2][-1], self.y_data[4][-1]] if self.y_data[0] and self.y_data[2] and self.y_data[4] else [0, 0, 0]
-        #     self.moment_widget.update_forces(fx_vals, fy_vals, fz_vals)
-
-        # Trim to max visible live window
-        while len(self.x_data) > self.max_live_points:
-            self.x_data.popleft()
-            for i in range(6):
-                self.y_data[i].popleft()
+        # Only trim if we're not showing historical range
+        if not self.appending_live_data:
+            while len(self.x_data) > self.max_live_points:
+                self.x_data.popleft()
+                for i in range(6):
+                    self.y_data[i].popleft()
 
         self.refresh_plot()
 
