@@ -331,26 +331,43 @@ class MainWindow(QMainWindow):
     def compute_moments_from_loads(self, loads):
         """
         Compute Mx, My, and Mz from raw load cell force readings.
+        Uses correct positions and force contributions based on physical layout.
         Positive directions:
-            - Fx: right
-            - Fy: down
-            - Fz: down
+            - Fx: right (LC6)
+            - Fy: down (LC2, LC4)
+            - Fz: down (LC1, LC3, LC5)
+            - Mx: about X (rotation in Y-Z plane)
+            - My: about Y (rotation in X-Z plane)
+            - Mz: about Z (rotation in X-Y plane)
         """
+        mm_to_in = 1 / 25.4
         positions = {
-            0: (-13, -7),  # LC1 (Fz)
-            1: (-10,  4),  # LC2 (Fy)
-            2: (0,    7),  # LC3 (Fz)
-            3: (10,   4),  # LC4 (Fy)
-            4: (13,  -7),  # LC5 (Fz)
-            5: (0,    0),  # LC6 (Fx)
+            0: (-330 * mm_to_in, 181 * mm_to_in),  # LC1 (Fz)
+            2: (0,            -181 * mm_to_in),    # LC3 (Fz)
+            4: (330 * mm_to_in, 181 * mm_to_in),   # LC5 (Fz)
+            1: (-257 * mm_to_in, -187 * mm_to_in), # LC2 (Fy)
+            3: (257 * mm_to_in, -187 * mm_to_in),  # LC4 (Fy)
         }
 
-        # Mx: Fy from LC2, LC4
-        mx = loads[1] * positions[1][0] + loads[3] * positions[3][0]
-        # My: Fz from LC1, LC5
-        my = loads[0] * positions[0][1] + loads[4] * positions[4][1]
-        # Mz: cross product from Fy × x
-        mz = loads[1] * positions[1][0] + loads[3] * positions[3][0]
+        # Mx: from Z-forces at y-offsets
+        mx = (
+            loads[0] * positions[0][1] +  # F1 * y1
+            loads[2] * positions[2][1] +  # F3 * y3
+            loads[4] * positions[4][1]    # F5 * y5
+        )
+
+        # My: from Z-forces at x-offsets (negated)
+        my = -(
+            loads[0] * positions[0][0] +  # -F1 * x1
+            loads[2] * positions[2][0] +  # -F3 * x3 (0)
+            loads[4] * positions[4][0]    # -F5 * x5
+        )
+
+        # Mz: from Y-forces at x-offsets
+        mz = (
+            loads[1] * positions[1][0] +  # F2 * x2
+            loads[3] * positions[3][0]    # F4 * x4
+        )
 
         return mx, my, mz
 

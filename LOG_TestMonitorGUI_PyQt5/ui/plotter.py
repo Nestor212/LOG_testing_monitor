@@ -61,7 +61,7 @@ class PlotWindow(QWidget):
         self.live_timer.timeout.connect(self.request_latest_live_point)
         self.live_mode = True
         self.live_window_minutes = 1
-        self.max_live_points = self.live_window_minutes * 60 * 2
+        self.max_live_points = self.live_window_minutes * 60 * 2 
 
         self.worker_thread = QThread()
         self.worker = SqlWorker()
@@ -93,7 +93,7 @@ class PlotWindow(QWidget):
         self.smoothing_selector.setCurrentIndex(0)
 
         self.wheel_type_selector = QComboBox()
-        self.wheel_type_selector.addItems(["60/40", "120"])
+        self.wheel_type_selector.addItems(["0.0", "0.0"])
 
         self.depth_input = QLineEdit("0.0")
         self.feed_rate_input = QLineEdit("0.0")
@@ -172,6 +172,18 @@ class PlotWindow(QWidget):
 
         self.toggle_live_mode(self.live_mode)
 
+    def update_plot_timer_interval(self):
+        smoothing_n = int(self.smoothing_selector.currentText().split()[0])
+
+        if smoothing_n <= 16:
+            interval = 250
+        elif smoothing_n <= 32:
+            interval = 500
+        else:
+            interval = 1000
+
+        self.live_timer.setInterval(interval)
+
     def rebuild_plot_layout(self, plot_data, mode_number):
         self.canvas.figure.clf()
 
@@ -211,54 +223,55 @@ class PlotWindow(QWidget):
 
     def compute_moments(self):
         """
-        Compute Mx, My, and Mz using force data and load cell positions.
+        Compute Mx, My, and Mz using corrected load cell positions and forces.
         Positive directions:
             - Fx: right (LC6)
             - Fy: down (LC2, LC4)
             - Fz: down (LC1, LC3, LC5)
-            - Mx: about X axis (rotation in Y-Z plane)
-            - My: about Y axis (rotation in X-Z plane)
-            - Mz: about Z axis (rotation in X-Y plane)
+            - Mx: rotation about X (Y-Z plane)
+            - My: rotation about Y (X-Z plane)
+            - Mz: rotation about Z (X-Y plane)
         """
+
+        # Positions in mm from origin at LC6 (converted to inches for moment units in lbf-in)
+        mm_to_in = 1 / 25.4
         positions = {
-            0: (-13, -7),  # LC1 (Fz)
-            1: (-10,  4),  # LC2 (Fy)
-            2: (0,    7),  # LC3 (Fz)
-            3: (10,   4),  # LC4 (Fy)
-            4: (13,  -7),  # LC5 (Fz)
-            5: (0,    0),  # LC6 (Fx)
+            0: (-330 * mm_to_in, 181 * mm_to_in),  # LC1 (Fz) 
+            2: (0,            -181 * mm_to_in),    # LC3 (Fz)
+            4: (330 * mm_to_in, 181 * mm_to_in),   # LC5 (Fz)
+            1: (-257 * mm_to_in, -187 * mm_to_in), # LC2 (Fy)
+            3: (257 * mm_to_in, -187 * mm_to_in),  # LC4 (Fy)
         }
 
         n = len(self.x_data)
 
-        # Mx: from Fy at x-offsets (LC2, LC4)
+        # Forces for LC1, LC3, LC5 (Z-direction): compute Mx and My
         moment_x = [
-            self.y_data[1][j] * positions[1][0] +  # LC2
-            self.y_data[3][j] * positions[3][0]    # LC4
+            self.y_data[0][j] * positions[0][1] +  # F1 * y1
+            self.y_data[2][j] * positions[2][1] +  # F3 * y3
+            self.y_data[4][j] * positions[4][1]    # F5 * y5
             for j in range(n)
         ]
 
-        # My: from Fz at y-offsets (LC1, LC5)
         moment_y = [
-            self.y_data[0][j] * positions[0][1] +  # LC1
-            self.y_data[4][j] * positions[4][1]    # LC5
+            -self.y_data[0][j] * positions[0][0] -  # -F1 * x1
+            self.y_data[2][j] * positions[2][0] -  # -F3 * x3 (which is 0)
+            self.y_data[4][j] * positions[4][0]     # -F5 * x5
             for j in range(n)
         ]
 
-        # Mz: cross product from Fy × x (LC2, LC4)
+        # Forces for LC2 and LC4 (Y-direction): compute Mz
         moment_z = [
-            self.y_data[1][j] * positions[1][0] +  # LC2
-            self.y_data[3][j] * positions[3][0]    # LC4
+            self.y_data[1][j] * positions[1][0] +  # F2 * x2
+            self.y_data[3][j] * positions[3][0]    # F4 * x4
             for j in range(n)
         ]
 
         return moment_x, moment_y, moment_z
 
-
     def refresh_plot(self):
         plot_data = self.plot_data_selector.currentText()
         plot_mode = self.plot_mode_selector.currentText()
-        # smoothing_n = int(self.smoothing_selector.currentText().split()[0])
 
         # Determine which data to plot
         if plot_data == "Fx/Fy/Fz vs Time":
@@ -298,16 +311,10 @@ class PlotWindow(QWidget):
             return [sum(data[i:i+n])/n for i in range(len(data)-n+1)]
 
         time_data = list(self.x_data)
-        # if smoothing_n > 1:
-        #     time_data = time_data[smoothing_n-1:]
 
         if plot_data == "Mx/My/Mz vs Time":
             labels = ["Mx", "My", "Mz"]
             moment_x, moment_y, moment_z = self.compute_moments()
-
-            # moment_x = smooth(moment_x, smoothing_n)
-            # moment_y = smooth(moment_y, smoothing_n)
-            # moment_z = smooth(moment_z, smoothing_n)
 
             if mode_number == 1:
                 self.individual_lines[0].set_data(time_data, moment_x)
@@ -374,7 +381,6 @@ class PlotWindow(QWidget):
         self.canvas.figure.autofmt_xdate()
         self.canvas.draw()
 
-
     def toggle_live_mode(self, checked):
         self.live_mode = checked
 
@@ -389,6 +395,8 @@ class PlotWindow(QWidget):
         self.start_time_edit.setEnabled(not checked or self.start_live_from_past_checkbox.isChecked())
         self.end_time_edit.setEnabled(not checked)
         self.averaging_selector.setEnabled(not checked)
+
+        self.update_plot_timer_interval()
 
         if not checked:
             self.live_timer.stop()
@@ -405,10 +413,19 @@ class PlotWindow(QWidget):
         self.max_live_points = self.live_window_minutes * 60 * avg_n  # 4 Hz
 
     def toggle_live_plotting(self):
+        self.update_plot_timer_interval()
+        self.plot_mode_selector.setEnabled()
+
         if self.live_timer.isActive():
             self.live_timer.stop()
             self.start_btn.setText("Start")
             self.window_selector.setEnabled(True)
+            self.plot_mode_selector.setEnabled(True)
+            self.smoothing_selector.setEnabled(True)
+            self.wheel_type_selector.setEnabled(True)
+            self.depth_input.setEnabled(True)
+            self.feed_rate_input.setEnabled(True)
+            self.pitch_input.setEnabled(True)
             return
 
         self.appending_live_data = False  # Default to reset mode
@@ -428,6 +445,12 @@ class PlotWindow(QWidget):
         self.live_timer.start()
         self.start_btn.setText("Stop")
         self.window_selector.setEnabled(False)
+        self.plot_mode_selector.setEnabled(False)
+        self.smoothing_selector.setEnabled(False)
+        self.wheel_type_selector.setEnabled(False)
+        self.depth_input.setEnabled(False)
+        self.feed_rate_input.setEnabled(False)
+        self.pitch_input.setEnabled(False)
 
     def request_latest_live_point(self):
         avg_n = int(self.smoothing_selector.currentText().split()[0])
