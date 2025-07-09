@@ -457,6 +457,10 @@ class PlotWindow(QWidget):
         self.worker.query_last_n_samples(avg_n)
 
     def on_live_point_ready(self, dt, values):
+        # Skip if this is a repeat of the most recent timestamp
+        if self.x_data and dt == self.x_data[-1]:
+            return
+
         self.x_data.append(dt)
         for i in range(6):
             self.y_data[i].append(values[i])
@@ -469,6 +473,20 @@ class PlotWindow(QWidget):
                     self.y_data[i].popleft()
 
         self.refresh_plot()
+
+    # def on_live_point_ready(self, dt, values):
+    #     self.x_data.append(dt)
+    #     for i in range(6):
+    #         self.y_data[i].append(values[i])
+
+    #     # Only trim if we're not showing historical range
+    #     if not self.appending_live_data:
+    #         while len(self.x_data) > self.max_live_points:
+    #             self.x_data.popleft()
+    #             for i in range(6):
+    #                 self.y_data[i].popleft()
+
+    #     self.refresh_plot()
 
     def plot_historical(self):
         start_dt = self.start_time_edit.dateTime().toPyDateTime()

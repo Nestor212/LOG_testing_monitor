@@ -1,7 +1,8 @@
 from PyQt5.QtWidgets import (
     QMainWindow, QLabel, QPushButton, QLineEdit,
     QVBoxLayout, QHBoxLayout, QWidget, QGridLayout, 
-    QFrame, QSizePolicy, QMessageBox, QCheckBox
+    QFrame, QSizePolicy, QMessageBox, QCheckBox,
+    QComboBox
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont, QColor, QPalette
@@ -32,8 +33,6 @@ class MainWindow(QMainWindow):
         self.setGeometry(100, 100, 800, 550)
 
         self.plot_windows = []
-        # self.plot_window = PlotWindow()
-        # self.moment_map_window = MomentMapWidget()
         self.export_data_window = Data()
 
         self.socket_thread = None
@@ -121,7 +120,7 @@ class MainWindow(QMainWindow):
 
         # Clock Label
         self.clock_label = QLabel("Time: ---")
-        self.clock_label.setFont(QFont("Arial", 12))
+        self.clock_label.setFont(QFont("Arial", 8))
         
         # Timer to update time every second
         self.timer = QTimer(self)
@@ -136,9 +135,25 @@ class MainWindow(QMainWindow):
         self.status_led.setFixedSize(20, 20)
         self.update_led("red")
 
-        self.load_offsets_checkbox = QCheckBox("Load Last Stored Offsets")
+        self.load_offsets_checkbox = QCheckBox("Load Stored Offsets")
         self.load_offsets_checkbox.setChecked(False)
-        # self.load_offsets_checkbox.toggled.connect(self.toggle_load_offsets_db_load)
+
+        self.trigger_checkbox = QCheckBox("Trigger")
+        self.trigger_checkbox.setChecked(False)
+
+        self.trigger_selector = QComboBox()
+        self.trigger_selector.addItems(["Threshold", "Delta"])
+        self.trigger_selector.setCurrentIndex(0)
+
+        self.trigger_input = QLineEdit("0.0")
+        self.trigger_label = QLabel("Force")
+
+        self.trigger_checkbox.stateChanged.connect(self.update_trigger_widget_states)
+        self.trigger_checkbox.stateChanged.connect(self.update_trigger_settings)
+        self.trigger_selector.currentIndexChanged.connect(self.update_trigger_settings)
+        self.trigger_input.textChanged.connect(self.update_trigger_settings)
+
+        self.update_trigger_widget_states()
 
         conn_layout = QHBoxLayout()
         conn_layout.addWidget(QLabel("IP:"))
@@ -147,6 +162,10 @@ class MainWindow(QMainWindow):
         conn_layout.addWidget(QLabel("Status:"))
         conn_layout.addWidget(self.status_led)
         conn_layout.addWidget(self.load_offsets_checkbox)
+        conn_layout.addWidget(self.trigger_checkbox)
+        conn_layout.addWidget(self.trigger_selector)
+        conn_layout.addWidget(self.trigger_label)
+        conn_layout.addWidget(self.trigger_input)
         conn_layout.addStretch(1)
         conn_layout.addWidget(self.clock_label)
 
@@ -251,6 +270,28 @@ class MainWindow(QMainWindow):
             writer = csv.writer(f)
             writer.writerow(["Timestamp", "LC_SPS", "Accel_SPS"])
 
+    def update_trigger_widget_states(self):
+        trigger_enabled = self.trigger_checkbox.isChecked()
+
+        self.trigger_selector.setEnabled(trigger_enabled)
+        self.trigger_input.setEnabled(trigger_enabled)
+        self.trigger_label.setEnabled(trigger_enabled)
+
+    def update_trigger_settings(self):
+        if self.socket_thread:
+            self.socket_thread.trigger_enabled = self.trigger_checkbox.isChecked()
+
+            try:
+                value = float(self.trigger_input.text())
+            except ValueError:
+                print("⚠ Invalid trigger value, must be float")
+                return
+
+            if self.trigger_selector.currentText() == "Threshold":
+                self.socket_thread.trigger_threshold = value
+            elif self.trigger_selector.currentText() == "Delta":
+                self.socket_thread.trigger_delta = value
+
     def show_plot_window(self):
         plot_window = PlotWindow()
         self.plot_windows.append(plot_window)
@@ -309,6 +350,7 @@ class MainWindow(QMainWindow):
             self.socket_thread = None
             self.connect_btn.setText("Connect")
             self.update_led("red")
+            self.update_trigger_widget_states()  # Disable trigger inputs when disconnected
         else:
             ip = self.ip_input.text().strip()
             if not ip:
@@ -321,6 +363,8 @@ class MainWindow(QMainWindow):
             self.update_led("green")
             if self.load_offsets_checkbox.isChecked():
                 self.socket_thread.load_last_offsets()
+
+            self.update_trigger_settings()         # Apply current GUI trigger config to thread
 
     def update_accel_led(self, color):
         palette = self.accel_led.palette()
