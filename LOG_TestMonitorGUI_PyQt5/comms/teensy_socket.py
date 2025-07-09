@@ -33,10 +33,10 @@ class TeensySocketThread(QThread):
         self.last_read_time = time.time()
 
         self.trigger_enabled = False
-        self.trigger_threshold = 0.0  # Force threshold in lbf
-        self.trigger_delta = 0.0      # Change threshold in lbf
-        self.last_force_vector = None
         self.trigger_active = False
+        self.trigger_mode = "Threshold"
+        self.trigger_value = 0.0  # Force threshold in lbf, or force delta depending on trigger mode
+        self.last_force_vector = None
 
         if getattr(sys, 'frozen', False):
             # Running as PyInstaller bundle
@@ -281,10 +281,15 @@ class TeensySocketThread(QThread):
         fz = loads[0] + loads[2] + loads[4]
         current_force = np.sqrt(fx**2 + fy**2 + fz**2)
 
-        triggered = current_force >= self.trigger_threshold
-        if self.last_force_vector is not None:
-            delta = abs(current_force - self.last_force_vector)
-            triggered = triggered or (delta >= self.trigger_delta)
+        triggered = False
+
+        if self.trigger_mode == "Threshold":
+            triggered = current_force >= self.trigger_value
+
+        elif self.trigger_mode == "Delta":
+            if self.last_force_vector is not None:
+                delta = abs(current_force - self.last_force_vector)
+                triggered = delta >= self.trigger_value
 
         if triggered and not self.trigger_active:
             print("⚡ Trigger condition met! Starting data collection.")

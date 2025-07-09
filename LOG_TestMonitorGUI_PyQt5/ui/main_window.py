@@ -288,9 +288,10 @@ class MainWindow(QMainWindow):
                 return
 
             if self.trigger_selector.currentText() == "Threshold":
-                self.socket_thread.trigger_threshold = value
+                self.socket_thread.trigger_mode = "Threshold"
             elif self.trigger_selector.currentText() == "Delta":
-                self.socket_thread.trigger_delta = value
+                self.socket_thread.trigger_mode = "Delta"
+            self.socket_thread.trigger_value = value
 
     def show_plot_window(self):
         plot_window = PlotWindow()

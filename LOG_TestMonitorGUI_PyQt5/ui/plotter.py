@@ -521,8 +521,8 @@ class PlotWindow(QWidget):
             print(f"Clicked near: {self.x_data[nearest_index]} -> {y_vals}")
 
     def hideEvent(self, event):
-        print("[PlotWindow] Window hidden — live timer paused.")
         if self.live_timer.isActive():
+            print("[PlotWindow] Window hidden — live timer paused.")
             self.live_timer.stop()
             self.start_btn.setText("Start")
             self.live_checkbox.setEnabled(True)
@@ -530,9 +530,11 @@ class PlotWindow(QWidget):
         event.accept()
 
     def closeEvent(self, event):
-        print("[PlotWindow] Window closed — stopping worker thread and live timer.")
+        print("[PlotWindow] Window closed.")
         if self.live_timer.isActive():
             self.live_timer.stop()
+            print("Live timer stopped.")
+        print("Stopping worker thread.")
         self.worker_thread.quit()
         self.worker_thread.wait()
         event.accept()
