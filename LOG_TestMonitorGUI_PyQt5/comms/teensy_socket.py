@@ -9,6 +9,7 @@ from PyQt5.QtCore import QThread
 from comms.parser_emitter import ParserEmitter
 from Database.db import get_connection  # Ensure this is at the top of your file
 from queue import Queue
+from collections import deque
 import threading
 import numpy as np
 
@@ -25,7 +26,7 @@ class TeensySocketThread(QThread):
         self.emitter = emitter
         self.last_emit_time = time.time()
         self.latest_data = None
-        self.emit_interval = 0.25  # 20 Hz
+        self.emit_interval = 0.50  # 20 Hz
         self.avg_load_buffer = []
         self.avg_accel_buffer = []
         self.avg_accel_on = False
@@ -37,6 +38,11 @@ class TeensySocketThread(QThread):
         self.trigger_mode = "Threshold"
         self.trigger_value = 0.0  # Force threshold in lbf, or force delta depending on trigger mode
         self.last_force_vector = None
+        self.pre_trigger_buffer = deque(maxlen=int(64*10))  # ~10 sec of pre-data
+        self.active_buffer = []
+        self.post_trigger_frames_remaining = 0
+        self.trigger_delay_frames = int(64*10)  # ~10 sec of post-data
+        self.last_fz = None
 
         if getattr(sys, 'frozen', False):
             # Running as PyInstaller bundle
@@ -48,7 +54,7 @@ class TeensySocketThread(QThread):
         self.data_dir = os.path.join(base_dir, "..", "Database", "Data")
         os.makedirs(self.data_dir, exist_ok=True)
 
-        self.load_buffer = []
+        self.db_load_buffer = []
         self.accel_buffer = []
         self.last_valid_accels = [0.0, 0.0, 0.0]  # Default accelerometer values
         self.last_flush = time.time()
@@ -63,9 +69,9 @@ class TeensySocketThread(QThread):
             self.zero_pending = {"loads": False, "accels": False}
             TeensySocketThread.first_connection_done = True
         else:
-            print("🔌 Subsequent connection detected, fetching latest zero offsets from DB.", flush=True)
+            # print("🔌 Subsequent connection detected, fetching latest zero offsets from DB.", flush=True)
             self.load_offsets = self.fetch_latest_load_offsets_from_db()
-            print(f"🔌 Loaded offsets: {self.load_offsets}", flush=True)
+            # print(f"🔌 Loaded offsets: {self.load_offsets}", flush=True)
             self.zero_pending = {"loads": False, "accels": False}
 
         self.accel_offset = [0.0, 0.0, 0.0]
@@ -78,7 +84,7 @@ class TeensySocketThread(QThread):
     def load_last_offsets(self):
         """Load the last stored offsets from the database."""
         self.load_offsets = self.fetch_latest_load_offsets_from_db()
-        print(f"🔌 Loaded offsets from DB: {self.load_offsets}", flush=True)
+        # print(f"🔌 Loaded offsets from DB: {self.load_offsets}", flush=True)
         self.zero_pending["loads"] = False
         TeensySocketThread.zeroed = True  # Mark as zeroed to avoid re-zeroing on next connection
 
@@ -150,23 +156,21 @@ class TeensySocketThread(QThread):
             else:
                 avg_accels = [0.0, 0.0, 0.0]
 
-            # ⛔ Only emit if trigger is not enabled or has fired
-            if not self.trigger_enabled or self.trigger_active:
-                self.latest_data = (
-                    timestamp_str,
-                    avg_loads,
-                    avg_accels,
-                    self.avg_accel_on,
-                    self.avg_accel_stale
-                )
+            self.latest_data = (
+                timestamp_str,
+                avg_loads,
+                avg_accels,
+                self.avg_accel_on,
+                self.avg_accel_stale
+            )
 
-                self.emitter.new_data.emit(
-                    timestamp_str,
-                    avg_loads,
-                    avg_accels,
-                    self.avg_accel_on,
-                    self.avg_accel_stale
-                )
+            self.emitter.new_data.emit(
+                timestamp_str,
+                avg_loads,
+                avg_accels,
+                self.avg_accel_on,
+                self.avg_accel_stale
+            )
 
             # 🔁 Always reset buffers regardless
             self.avg_load_buffer.clear()
@@ -194,8 +198,8 @@ class TeensySocketThread(QThread):
                 self.sync_time()
 
                 while self.running:
-                    if time.time() - self.last_read_time > 0.1:
-                        print(F"Elapsed time since last read: {time.time() - self.last_read_time:.2f} seconds", flush=True)
+                    # if time.time() - self.last_read_time > 0.1:
+                        # print(F"Elapsed time since last read: {time.time() - self.last_read_time:.2f} seconds", flush=True)
                     
                     self.last_read_time = time.time()
                     try:
@@ -214,8 +218,8 @@ class TeensySocketThread(QThread):
                                 self.handle_line(line)
                                 t1 = time.time()
                                 dt = (t1 - t0) * 1000  # ms
-                                if dt > 2:  # flag slow lines
-                                    print(f"🐢 handle_line took {dt:.2f} ms", flush=True)
+                                # if dt > 2:  # flag slow lines
+                                #     print(f"🐢 handle_line took {dt:.2f} ms", flush=True)
                                 line_counter += 1
                             else:
                                 print(f"⚠️ Malformed or partial line: {line}", flush=True)
@@ -252,6 +256,11 @@ class TeensySocketThread(QThread):
             adjusted_loads = self._process_loads(loads, timestamp)
             adjusted_accels = self._process_accels(accels, accel_on, accel_stale, timestamp)
 
+            # Save values to emitter buffers
+            self.avg_load_buffer.append(adjusted_loads)
+            if adjusted_accels is not None:
+                self.avg_accel_buffer.append(adjusted_accels)
+
             self._update_trigger_logic(adjusted_loads)
             self._update_sps_counter(timestamp.timestamp(), bool(adjusted_accels))
 
@@ -276,45 +285,75 @@ class TeensySocketThread(QThread):
         if not self.trigger_enabled:
             return
 
-        fx = loads[5]
-        fy = loads[1] + loads[3]
         fz = loads[0] + loads[2] + loads[4]
-        current_force = np.sqrt(fx**2 + fy**2 + fz**2)
-
         triggered = False
+        untriggered = False
 
         if self.trigger_mode == "Threshold":
-            triggered = current_force >= self.trigger_value
+            if not self.trigger_active and fz >= self.trigger_value:
+                triggered = True
+            elif self.trigger_active and fz < self.trigger_value:
+                untriggered = True
 
         elif self.trigger_mode == "Delta":
-            if self.last_force_vector is not None:
-                delta = abs(current_force - self.last_force_vector)
-                triggered = delta >= self.trigger_value
+            if self.last_fz is not None:
+                delta = fz - self.last_fz
+                if not self.trigger_active and delta >= self.trigger_value:
+                    triggered = True
+                elif self.trigger_active and delta <= -self.trigger_value:
+                    untriggered = True
 
-        if triggered and not self.trigger_active:
-            print("⚡ Trigger condition met! Starting data collection.")
+        self.last_fz = fz
+
+        # 🔼 Trigger just activated
+        if triggered:
+            # print("⚡ Trigger ON")
             self.trigger_active = True
+            self.post_trigger_frames_remaining = 0
+            self.db_load_buffer = list(self.pre_trigger_buffer)
+            print(f"Triggered. Db load buffer size: {len(self.db_load_buffer)}")
+            self.trigger_timestamp = datetime.datetime.now()
+            self.emitter.trigger_started.emit(self.trigger_timestamp)           
 
-        self.last_force_vector = current_force
+        # 🔽 Start post-trigger countdown on falling edge
+        elif untriggered and self.trigger_active and self.post_trigger_frames_remaining == 0:
+            # print("⏹ Trigger OFF (start delay)")
+            self.post_trigger_frames_remaining = self.trigger_delay_frames
+
+        # ⏳ Finish countdown if started
+        if untriggered and self.post_trigger_frames_remaining > 0:
+            self.post_trigger_frames_remaining -= 1
+
+            # When delay ends, finish session
+            if self.post_trigger_frames_remaining == 0:
+                # print("🛑 Trigger DONE — flushing to log")
+                self.trigger_active = False
 
     def _process_loads(self, loads, timestamp):
         adjusted = [l - offset - zero for l, offset, zero in zip(loads, self.load_offsets, self.lc_zero_load_offset)]
         rounded = [round(x, 4) for x in adjusted]
 
-        self.load_buffer.append((timestamp, *rounded))
-        self.avg_load_buffer.append(adjusted)
+        self.pre_trigger_buffer.append((timestamp, *rounded))
+
+        # Store if trigger is active or finishing
+        if self.trigger_enabled:
+            if self.trigger_active or self.post_trigger_frames_remaining > 0:
+                self.db_load_buffer.append((timestamp, *rounded))
+        else:
+            # Trigger disabled — regular logging
+            self.db_load_buffer.append((timestamp, *rounded))
+
         return adjusted
 
     def _process_accels(self, accels, accel_on, accel_stale, timestamp):
         if not accels:
-            return []
+            return None
 
         adjusted = [a - offset for a, offset in zip(accels, self.accel_offset)]
         rounded = [round(a, 4) for a in adjusted]
         self.last_valid_accels = adjusted
 
         self.accel_buffer.append([timestamp.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]] + rounded)
-        self.avg_accel_buffer.append(adjusted)
         self.avg_accel_on = True
         self.avg_accel_stale = accel_stale
 
@@ -337,62 +376,6 @@ class TeensySocketThread(QThread):
             self.lc_sps_counter = 1
             self.accel_sps_counter = 1 if has_accel else 0
 
-
-
-    # def handle_line(self, line):
-    #     try:
-    #         # print(f"📥 Received line: {line}", flush=True)
-    #         fields = line[3:].strip().split()
-    #         if len(fields) != 12:
-    #             return
-
-    #         raw_ts = float(fields[0])
-    #         timestamp = datetime.datetime.fromtimestamp(raw_ts)
-    #         timestamp_str = timestamp.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-    #         loads = list(map(float, fields[1:7]))
-    #         accel_on = int(fields[7])
-    #         accel_stale = fields[11] == '1'
-    #         accels = list(map(float, fields[8:11])) if accel_on and not accel_stale else []
-
-    #         # Update buffer for logging data to db
-    #         if accels:
-    #             adjusted_accels = [a - offset for a, offset in zip(accels, self.accel_offset)]
-    #             self.last_valid_accels = adjusted_accels
-    #             rounded_accels = [round(l, 4) for l in adjusted_accels]
-    #             self.accel_buffer.append([timestamp_str] + rounded_accels)
-
-    #         adjusted_loads = [l - offset - zero_load for l, offset, zero_load in zip(loads, self.load_offsets, self.lc_zero_load_offset)]
-    #         rounded_loads = [round(l, 4) for l in adjusted_loads]
-    #         self.load_buffer.append((timestamp, *rounded_loads))
-
-    #         # Update average buffers for UI displau
-    #         self.avg_load_buffer.append(adjusted_loads)
-    #         if accels:
-    #             self.avg_accel_buffer.append(self.last_valid_accels)
-    #             self.avg_accel_on = True
-    #             self.avg_accel_stale = accel_stale
-
-    #         # self.latest_data = (timestamp_str, adjusted_loads, self.last_valid_accels, accel_on, accel_stale)
-    #         # --- SPS counter ---
-    #         current_sec = int(raw_ts)
-    #         if not hasattr(self, 'last_sps_sec'):
-    #             self.last_sps_sec = current_sec
-    #             self.lc_sps_counter = 0
-    #             self.accel_sps_counter = 0
-
-    #         if current_sec == self.last_sps_sec:
-    #             self.lc_sps_counter += 1
-    #             if accels:
-    #                 self.accel_sps_counter += 1
-    #         else:
-    #             self.emitter.update_sps.emit(self.lc_sps_counter, self.accel_sps_counter)
-    #             self.last_sps_sec = current_sec
-    #             self.lc_sps_counter = 1
-    #             self.accel_sps_counter = 1 if accels else 0
-
-    #     except Exception as e:
-    #         print(f"⚠️ Parse error: {e} — line: {line}", flush=True)
-    
     def _db_writer_loop(self):
         # Open CSV files once for appending
         lc_log_path = os.path.join(self.data_dir, "load_buffer_log.csv.csv")
@@ -428,14 +411,14 @@ class TeensySocketThread(QThread):
                             ) VALUES (?, ?, ?, ?)
                         """, [now_str] + payload["accel_offset"])
 
-                    if payload["load_buffer"]:
+                    if payload["db_load_buffer"]:
                         cursor.executemany("""
                             INSERT INTO load_cells (timestamp, lc1, lc2, lc3, lc4, lc5, lc6)
                             VALUES (?, ?, ?, ?, ?, ?, ?)
-                        """, payload["load_buffer"])
+                        """, payload["db_load_buffer"])
 
                         # Write to CSV
-                        for row in payload["load_buffer"]:
+                        for row in payload["db_load_buffer"]:
                             load_writer.writerow(row)
 
                     if payload["accel_buffer"]:
@@ -458,91 +441,26 @@ class TeensySocketThread(QThread):
     def flush_logs(self):
         # If trigger is enabled but not yet fired, skip flushing
         if self.trigger_enabled and not self.trigger_active:
-            self.load_buffer.clear()
+            self.db_load_buffer.clear()
             self.accel_buffer.clear()
             return
-
+        # print("flushing logs.")
         now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
 
         payload = {
             "zero_pending": self.zero_pending.copy(),
             "load_offsets": self.load_offsets.copy(),
             "accel_offset": self.accel_offset.copy(),
-            "load_buffer": self.load_buffer.copy(),
+            "db_load_buffer": self.db_load_buffer.copy(),
             "accel_buffer": self.accel_buffer.copy(),
             "timestamp": now_str
         }
 
         self.zero_pending = {"loads": False, "accels": False}
-        self.load_buffer.clear()
+        self.db_load_buffer.clear()
         self.accel_buffer.clear()
 
         self.db_queue.put(payload)
-
-    # def flush_logs(self):
-    #     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-
-    #     payload = {
-    #         "zero_pending": self.zero_pending.copy(),
-    #         "load_offsets": self.load_offsets.copy(),
-    #         "accel_offset": self.accel_offset.copy(),
-    #         "load_buffer": self.load_buffer.copy(),
-    #         "accel_buffer": self.accel_buffer.copy(),
-    #         "timestamp": now_str
-    #     }
-
-    #     self.zero_pending = {"loads": False, "accels": False}
-    #     self.load_buffer.clear()
-    #     self.accel_buffer.clear()
-
-    #     self.db_queue.put(payload)
-
-    # def flush_csv_logs(self):
-    #     now = time.time()
-
-    #     if self.zero_pending["loads"]:
-    #         log_path = os.path.join(self.data_dir, "load_cell_zero_offsets.csv")
-    #         with open(log_path, 'a', newline='') as f:
-    #             writer = csv.writer(f)
-    #             writer.writerow(["Timestamp"] + [f"LC{i+1} Offset" for i in range(6)])
-    #             writer.writerow([datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]] + self.load_offsets)
-    #         self.zero_pending["loads"] = False
-
-    #     if self.zero_pending["accels"]:
-    #         log_path = os.path.join(self.data_dir, "accelerometer_zero_offsets.csv")
-    #         with open(log_path, 'a', newline='') as f:
-    #             writer = csv.writer(f)
-    #             writer.writerow(["Timestamp", "AX Offset", "AY Offset", "AZ Offset"])
-    #             writer.writerow([datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]] + self.accel_offset)
-    #         self.zero_pending["accels"] = False
-
-    #     if now - self.last_flush < 2.0:
-    #         return
-    #     self.last_flush = now
-
-    #     if self.load_buffer:
-    #         log_date = datetime.datetime.now().strftime("%Y-%m-%d")
-    #         log_path = os.path.join(self.data_dir, f"load_cell_log_{log_date}.csv")
-    #         file_exists = os.path.isfile(log_path)
-
-    #         with open(log_path, 'a', newline='') as f:
-    #             writer = csv.writer(f)
-    #             if not file_exists:
-    #                 writer.writerow(["Timestamp"] + [f"LC{i+1}" for i in range(6)])
-    #             writer.writerows(self.load_buffer)
-    #         self.load_buffer.clear()
-
-    #     if self.accel_buffer:
-    #         log_date = datetime.datetime.now().strftime("%Y-%m-%d")
-    #         log_path = os.path.join(self.data_dir, f"accelerometer_log_{log_date}.csv")
-    #         file_exists = os.path.isfile(log_path)
-
-    #         with open(log_path, 'a', newline='') as f:
-    #             writer = csv.writer(f)
-    #             if not file_exists:
-    #                 writer.writerow(["Timestamp", "AX", "AY", "AZ"])
-    #             writer.writerows(self.accel_buffer)
-    #         self.accel_buffer.clear()
 
     def sync_time(self):
         if self.s:

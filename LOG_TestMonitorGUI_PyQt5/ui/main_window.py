@@ -16,21 +16,24 @@ import csv
 import os
 import datetime
 import sys
+import time
 
 def format_force(value, axis):
     if axis == "X":
-        arrow = "←" if value >= 0 else "→"
+        arrow = "→" if value >= 0 else "←"
     elif axis == "Y":
-        arrow = "↑" if value >= 0 else "↓"
+        arrow = "↓" if value >= 0 else "↑"
     elif axis == "Z":
         arrow = "▼" if value >= 0 else "▲"
-    return f"{value:+.1f} {arrow}"
+    return f"{value:+.2f} {arrow}"
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Force Display — Teensy Monitor")
         self.setGeometry(100, 100, 800, 550)
+
+        self.port = 5000
 
         self.plot_windows = []
         self.export_data_window = Data()
@@ -53,12 +56,12 @@ class MainWindow(QMainWindow):
 
         grid = QGridLayout()
         grid.setSpacing(10)
-        grid.addWidget(self.labels["LC5"], 0, 0)
-        grid.addWidget(self.labels["LC1"], 0, 2)
+        grid.addWidget(self.labels["LC5"], 2, 2)
+        grid.addWidget(self.labels["LC1"], 2, 0)
         grid.addWidget(self.labels["LC6"], 1, 1)
-        grid.addWidget(self.labels["LC4"], 2, 0)
-        grid.addWidget(self.labels["LC3"], 2, 1)
-        grid.addWidget(self.labels["LC2"], 2, 2)
+        grid.addWidget(self.labels["LC4"], 0, 2)
+        grid.addWidget(self.labels["LC3"], 0, 1)
+        grid.addWidget(self.labels["LC2"], 0, 0)
 
         frame = QFrame()
         frame.setFrameStyle(QFrame.Panel | QFrame.Raised)
@@ -128,7 +131,8 @@ class MainWindow(QMainWindow):
         self.timer.start(1000)
 
         # Connection Controls
-        self.ip_input = QLineEdit("192.168.1.232")
+        #self.ip_input = QLineEdit("192.168.1.232")
+        self.ip_input = QLineEdit("10.130.91.42")
         self.connect_btn = QPushButton("Connect")
         self.connect_btn.clicked.connect(self.toggle_connection)
         self.status_led = QLabel()
@@ -273,9 +277,9 @@ class MainWindow(QMainWindow):
     def update_trigger_widget_states(self):
         trigger_enabled = self.trigger_checkbox.isChecked()
 
-        self.trigger_selector.setEnabled(trigger_enabled)
-        self.trigger_input.setEnabled(trigger_enabled)
-        self.trigger_label.setEnabled(trigger_enabled)
+        self.trigger_selector.setEnabled(not trigger_enabled)
+        self.trigger_input.setEnabled(not trigger_enabled)
+        self.trigger_label.setEnabled(not trigger_enabled)
 
     def update_trigger_settings(self):
         if self.socket_thread:
@@ -292,9 +296,10 @@ class MainWindow(QMainWindow):
             elif self.trigger_selector.currentText() == "Delta":
                 self.socket_thread.trigger_mode = "Delta"
             self.socket_thread.trigger_value = value
+            print("Trigger values updated.")
 
     def show_plot_window(self):
-        plot_window = PlotWindow()
+        plot_window = PlotWindow(self.signal_emitter)
         self.plot_windows.append(plot_window)
         plot_window.show()
 
@@ -351,13 +356,14 @@ class MainWindow(QMainWindow):
             self.socket_thread = None
             self.connect_btn.setText("Connect")
             self.update_led("red")
+            self.update_accel_led("red")
             self.update_trigger_widget_states()  # Disable trigger inputs when disconnected
         else:
             ip = self.ip_input.text().strip()
             if not ip:
                 return
             self.update_led("yellow")
-            self.socket_thread = TeensySocketThread(ip, 5000, self.signal_emitter)
+            self.socket_thread = TeensySocketThread(ip, self.port, self.signal_emitter)
             self.initUI = False
             self.socket_thread.start()
             self.connect_btn.setText("Disconnect")
@@ -429,7 +435,8 @@ class MainWindow(QMainWindow):
 
         # Acceleration LED and values
         accel_color = "green" if accel_on else "red"
-        self.update_accel_led(accel_color)
+        if self.socket_thread:
+            self.update_accel_led(accel_color)
 
         if accel_on:
             self.accel_title.setText("Acceleration (g)")

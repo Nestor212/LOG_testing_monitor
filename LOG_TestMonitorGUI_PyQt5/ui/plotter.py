@@ -25,18 +25,24 @@ from PyQt5.QtCore import QDateTime, QTimer, QThread
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas, NavigationToolbar2QT as NavigationToolbar
 from ui.sql_worker import SqlWorker
+from comms.parser_emitter import ParserEmitter
 
 import matplotlib.ticker as ticker
+import time
 
 def format_msec(x, pos=None):
     dt = mdates.num2date(x)
     return dt.strftime("%H:%M:%S.") + f"{int(dt.microsecond/10000):02d}"
 
 class PlotWindow(QWidget):
-    def __init__(self):
+    def __init__(self, emitter: ParserEmitter):
         super().__init__()
         self.setWindowTitle("Load Cell Plotter")
         self.resize(1000, 800)
+
+        self.trigger_emitter = emitter
+        self.trigger_emitter.trigger_started.connect(self.load_pretrigger_plot_data)
+        self.appending_live_data = False
 
         self.x_data = collections.deque()
         self.y_data = [collections.deque() for _ in range(6)]
@@ -172,6 +178,16 @@ class PlotWindow(QWidget):
 
         self.toggle_live_mode(self.live_mode)
 
+    def load_pretrigger_plot_data(self, trigger_time):
+        print(f"🔄 Trigger received at {trigger_time} — loading pre-trigger data...")
+        pre_time = trigger_time - datetime.timedelta(seconds=10)
+        avg_n = int(self.smoothing_selector.currentText().split()[0])
+
+        self.appending_live_data = False  # 🚫 Block appending until preload finishes
+        self.waiting_for_pretrigger_plot = True
+        time.sleep(0.1)  # Give UI a moment to update
+        self.worker.query_range(pre_time, trigger_time, avg_n)
+
     def update_plot_timer_interval(self):
         smoothing_n = int(self.smoothing_selector.currentText().split()[0])
 
@@ -305,11 +321,6 @@ class PlotWindow(QWidget):
             self.rebuild_plot_layout(plot_data, mode_number)
             self.current_mode = (plot_data, mode_number)
 
-        def smooth(data, n):
-            if n <= 1 or len(data) < n:
-                return data
-            return [sum(data[i:i+n])/n for i in range(len(data)-n+1)]
-
         time_data = list(self.x_data)
 
         if plot_data == "Mx/My/Mz vs Time":
@@ -381,6 +392,22 @@ class PlotWindow(QWidget):
         self.canvas.figure.autofmt_xdate()
         self.canvas.draw()
 
+    def plot_historical(self):
+        # Clear plot buffers
+        self.x_data.clear()
+        self.y_data = [collections.deque() for _ in range(6)]
+
+        # Reset current mode to force layout rebuild
+        self.current_mode = None
+        plot_data = self.plot_data_selector.currentText()
+        mode_number = 1 if self.plot_mode_selector.currentText() == "Single Plot" else 2
+        self.rebuild_plot_layout(plot_data, mode_number)
+
+        start_dt = self.start_time_edit.dateTime().toPyDateTime()
+        end_dt = self.end_time_edit.dateTime().toPyDateTime()
+        avg_n = int(self.averaging_selector.currentText().split()[0])
+        self.worker.query_range(start_dt, end_dt, avg_n)
+
     def toggle_live_mode(self, checked):
         self.live_mode = checked
 
@@ -409,12 +436,19 @@ class PlotWindow(QWidget):
             self.window_selector.setEnabled(not checked)
 
     def update_live_window(self):
+        selected = self.window_selector.currentText()
+        if "min" in selected:
+            self.live_window_minutes = int(selected.split()[0])
+        elif "hr" in selected:
+            self.live_window_minutes = int(selected.split()[0]) * 60
+        else:
+            self.live_window_minutes = 1  # Default fallback
+
         avg_n = int(self.smoothing_selector.currentText().split()[0])
-        self.max_live_points = self.live_window_minutes * 60 * avg_n  # 4 Hz
+        self.max_live_points = self.live_window_minutes * 60 * avg_n
 
     def toggle_live_plotting(self):
         self.update_plot_timer_interval()
-        self.plot_mode_selector.setEnabled()
 
         if self.live_timer.isActive():
             self.live_timer.stop()
@@ -427,6 +461,16 @@ class PlotWindow(QWidget):
             self.feed_rate_input.setEnabled(True)
             self.pitch_input.setEnabled(True)
             return
+        
+        # Clear plot buffers
+        self.x_data.clear()
+        self.y_data = [collections.deque() for _ in range(6)]
+
+        # Reset current mode to force layout rebuild
+        self.current_mode = None
+        plot_data = self.plot_data_selector.currentText()
+        mode_number = 1 if self.plot_mode_selector.currentText() == "Single Plot" else 2
+        self.rebuild_plot_layout(plot_data, mode_number)
 
         self.appending_live_data = False  # Default to reset mode
 
@@ -438,9 +482,13 @@ class PlotWindow(QWidget):
             self.appending_live_data = True  # Enable appending mode
             self.worker.query_range(start_dt, end_dt, avg_n)
         else:
-            # Start fresh
-            self.x_data.clear()
+            # Start fresh live mode
+            # self.x_data.clear()
             self.y_data = [collections.deque() for _ in range(6)]
+            self.appending_live_data = True  # Enable appending mode for live updates
+
+            # ⚠️ Do not preload any data — pretrigger data will be fetched when trigger fires
+            print("🔄 Live mode started — waiting for trigger to fetch pre-trigger data.")
 
         self.live_timer.start()
         self.start_btn.setText("Stop")
@@ -453,12 +501,16 @@ class PlotWindow(QWidget):
         self.pitch_input.setEnabled(False)
 
     def request_latest_live_point(self):
+        if getattr(self, 'waiting_for_pretrigger_plot', False):
+            print("⏳ Waiting for pre-trigger data, skipping live point request")
+            return
+
         avg_n = int(self.smoothing_selector.currentText().split()[0])
         self.worker.query_last_n_samples(avg_n)
 
     def on_live_point_ready(self, dt, values):
         # Skip if this is a repeat of the most recent timestamp
-        if self.x_data and dt == self.x_data[-1]:
+        if self.x_data and dt <= self.x_data[-1]:
             return
 
         self.x_data.append(dt)
@@ -488,24 +540,32 @@ class PlotWindow(QWidget):
 
     #     self.refresh_plot()
 
-    def plot_historical(self):
-        start_dt = self.start_time_edit.dateTime().toPyDateTime()
-        end_dt = self.end_time_edit.dateTime().toPyDateTime()
-        avg_n = int(self.averaging_selector.currentText().split()[0])
-        self.worker.query_range(start_dt, end_dt, avg_n)
-
     def on_data_ready(self, data):
-        if not self.appending_live_data:
-            self.x_data.clear()
-            self.y_data = [collections.deque() for _ in range(6)]
-
+        """
+        Called when historical data (e.g., pre-trigger) is loaded.
+        If self.waiting_for_pretrigger_plot is True, this data is pre-trigger and
+        appending of live data will start only after this is loaded.
+        """
         for dt, loads in data:
             self.x_data.append(dt)
             for i in range(6):
                 self.y_data[i].append(loads[i])
 
         print(f"[PlotWindow] Loaded {len(data)} historical points")
+
+        # ✅ If waiting for pre-trigger plot, now enable live appending
+        if getattr(self, 'waiting_for_pretrigger_plot', False):
+            self.waiting_for_pretrigger_plot = False
+            self.appending_live_data = True
+            # print("[PlotWindow] ✅ Pre-trigger data loaded — now accepting live updates")
+
+        # Clear existing data if not appending
+        if not self.appending_live_data:
+            self.x_data.clear()
+            self.y_data = [collections.deque() for _ in range(6)]
+
         self.refresh_plot()
+
 
     def on_error(self, msg):
         print(f"[SqlWorker] Error: {msg}")
@@ -518,7 +578,7 @@ class PlotWindow(QWidget):
             click_time = mdates.num2date(event.xdata)
             nearest_index = min(range(len(self.x_data)), key=lambda i: abs(self.x_data[i] - click_time))
             y_vals = [self.y_data[i][nearest_index] for i in range(6)]
-            print(f"Clicked near: {self.x_data[nearest_index]} -> {y_vals}")
+            # print(f"Clicked near: {self.x_data[nearest_index]} -> {y_vals}")
 
     def hideEvent(self, event):
         if self.live_timer.isActive():
