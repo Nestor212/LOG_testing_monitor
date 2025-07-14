@@ -68,25 +68,46 @@ class MainWindow(QMainWindow):
         frame.setLineWidth(3)
         frame.setLayout(grid)
         frame.setFixedSize(420, 240)
+###################
 
-        # Force Labels and SPS
+        # Create the forces container widget
+        forces_container = QWidget()
+
+        # Forces title
         self.forces_title = QLabel("Forces (lbf)")
         self.forces_title.setFont(QFont("Arial", 16, QFont.Bold))
+
+        # SPS label
         self.lc_sps_label = QLabel("SPS: ---")
         self.lc_sps_label.setFont(QFont("Arial", 12))
-        forces_header = QHBoxLayout()
-        forces_header.addWidget(self.forces_title)
-        forces_header.addSpacing(10)
-        forces_header.addWidget(self.lc_sps_label)
 
-        forces_header_container = QWidget()
-        forces_header_container.setLayout(forces_header)
+        # Horizontal layout for the top row (forces + SPS)
+        forces_row_layout = QHBoxLayout()
+        forces_row_layout.addStretch()
+        forces_row_layout.addWidget(self.forces_title)
+        forces_row_layout.addSpacing(10)
+        forces_row_layout.addWidget(self.lc_sps_label)
+        forces_row_layout.addStretch()
 
-        forces_header_layout = QHBoxLayout()
-        forces_header_layout.addStretch()
-        forces_header_layout.addWidget(forces_header_container)
-        forces_header_layout.addStretch()
+        # Orientation label (second row)
+        self.orientation_label = QLabel("(↑ Center of Turn Table ↑)")
+        self.orientation_label.setFont(QFont("Arial", 10))  # Optional: Slightly smaller font
+        self.orientation_label.setStyleSheet("color: gray;")  # Optional: Gray for subtlety
+        self.orientation_label.setAlignment(Qt.AlignCenter)
 
+        # Combine both into a vertical layout
+        forces_container_layout = QVBoxLayout()
+        forces_container_layout.addLayout(forces_row_layout)      # Top row: Forces + SPS
+        forces_container_layout.addWidget(self.orientation_label) # Bottom: Orientation
+
+        # Set layout to the container widget
+        forces_container.setLayout(forces_container_layout)
+
+        # Add to your main layout (example)
+        # main_layout.addWidget(forces_container)
+
+
+###################
         # Acceleration Labels and SPS
         self.accel_led = QLabel()
         self.accel_led.setFixedSize(20, 20)
@@ -247,7 +268,7 @@ class MainWindow(QMainWindow):
         # Main Layout
         main_layout = QVBoxLayout()
         main_layout.addLayout(conn_layout)
-        main_layout.addLayout(forces_header_layout)
+        main_layout.addWidget(forces_container)
         main_layout.addWidget(frame, alignment=Qt.AlignCenter)
         main_layout.addWidget(legend)
         main_layout.addLayout(net_force_grid)
