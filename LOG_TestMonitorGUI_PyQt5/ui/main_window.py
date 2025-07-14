@@ -452,7 +452,27 @@ class MainWindow(QMainWindow):
         for i, lc in enumerate(["LC1", "LC2", "LC3", "LC4", "LC5", "LC6"]):
             axis = axis_map[lc]
             force_val = loads[i]
-            self.labels[lc].setText(f"{lc}:\n {format_force(force_val, axis)}")
+            label_text = f"{lc}:\n {format_force(force_val, axis)}"
+
+            # Contact loss detection for Z-axis cells with non-zero preload
+            if lc in ["LC1", "LC3", "LC5"]:
+                preload = self.socket_thread.load_offsets[i]
+                if preload != 0.0 and force_val < -preload:
+                    # Contact lost → highlight red
+                    self.labels[lc].setStyleSheet("color: red; border: 2px solid red;")
+                else:
+                    # Normal style
+                    self.labels[lc].setStyleSheet("color: black; border: none;")
+            else:
+                # Other load cells, no contact check
+                self.labels[lc].setStyleSheet("color: black; border: none;")
+
+            self.labels[lc].setText(label_text)
+
+        # for i, lc in enumerate(["LC1", "LC2", "LC3", "LC4", "LC5", "LC6"]):
+        #     axis = axis_map[lc]
+        #     force_val = loads[i]
+        #     self.labels[lc].setText(f"{lc}:\n {format_force(force_val, axis)}")
 
         # Acceleration LED and values
         accel_color = "green" if accel_on else "red"
