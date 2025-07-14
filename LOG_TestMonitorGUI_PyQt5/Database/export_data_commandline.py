@@ -37,6 +37,7 @@ OPTIONS:
   --lc_offsets    Export Load Cell Zero Offsets
   --accel_offsets Export Accelerometer Zero Offsets
   --all           Export all data (default)
+  --smooth N      Apply smoothing factor (default: 1)          
   -h, --help      Show this help message
 """)
 
