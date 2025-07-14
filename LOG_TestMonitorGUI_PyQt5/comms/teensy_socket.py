@@ -378,7 +378,7 @@ class TeensySocketThread(QThread):
 
     def _db_writer_loop(self):
         # Open CSV files once for appending
-        lc_log_path = os.path.join(self.data_dir, "load_buffer_log.csv.csv")
+        lc_log_path = os.path.join(self.data_dir, "load_buffer_log.csv")
         accel_log_path = os.path.join(self.data_dir, "accel_buffer_log.csv")
 
         with open(lc_log_path, "a", newline="") as load_csv_file, \
