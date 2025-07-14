@@ -10,6 +10,7 @@ def get_db_path():
         # Running from source
         base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Data")
 
+    print(f"Database path: {base_dir}")
     os.makedirs(base_dir, exist_ok=True)
     return os.path.join(base_dir, "data_log.db")
 

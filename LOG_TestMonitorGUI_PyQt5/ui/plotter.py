@@ -526,20 +526,6 @@ class PlotWindow(QWidget):
 
         self.refresh_plot()
 
-    # def on_live_point_ready(self, dt, values):
-    #     self.x_data.append(dt)
-    #     for i in range(6):
-    #         self.y_data[i].append(values[i])
-
-    #     # Only trim if we're not showing historical range
-    #     if not self.appending_live_data:
-    #         while len(self.x_data) > self.max_live_points:
-    #             self.x_data.popleft()
-    #             for i in range(6):
-    #                 self.y_data[i].popleft()
-
-    #     self.refresh_plot()
-
     def on_data_ready(self, data):
         """
         Called when historical data (e.g., pre-trigger) is loaded.

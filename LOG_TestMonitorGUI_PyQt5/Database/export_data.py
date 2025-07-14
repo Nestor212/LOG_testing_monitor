@@ -1,13 +1,14 @@
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, 
-    QDateTimeEdit, QFileDialog, QMessageBox, QCheckBox
+    QDateTimeEdit, QFileDialog, QMessageBox, QCheckBox, QComboBox
 )
 from PyQt5.QtCore import QDateTime
-import sqlite3
 import csv
 import datetime
 import os
 from Database.db import get_connection
+import pandas as pd
+import numpy as np
 
 
 class DataExportDialog(QDialog):
@@ -30,6 +31,12 @@ class DataExportDialog(QDialog):
         self.end_dt.setCalendarPopup(True)
         layout.addWidget(QLabel("End Time:"))
         layout.addWidget(self.end_dt)
+
+        self.smoothing_label = QLabel("Smoothing Factor (1 = Raw):")
+        self.smoothing_combo = QComboBox()
+        self.smoothing_combo.addItems(["1", "2", "4", "8", "16", "32", "64"])
+        layout.addWidget(self.smoothing_label)
+        layout.addWidget(self.smoothing_combo)
 
         # Checkboxes
         self.cb_load_cells = QCheckBox("Export Load Cells")
@@ -110,6 +117,8 @@ class DataExportDialog(QDialog):
             QMessageBox.critical(self, "Export Failed", f"❌ Error: {e}")
 
     def export_table(self, table, columns, start_time, end_time, filename):
+        smoothing_factor = int(self.smoothing_combo.currentText())
+
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute(f"""
@@ -121,16 +130,24 @@ class DataExportDialog(QDialog):
         rows = cursor.fetchall()
         conn.close()
 
-        full_path = os.path.join(self.output_folder, filename)
-        with open(full_path, "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(columns)
-            for row in rows:
-                ts = row[0]
-                if isinstance(ts, datetime.datetime):
-                    ts_str = ts.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-                else:
-                    ts_str = str(ts)
-                writer.writerow([ts_str] + list(row[1:]))
+        # Create DataFrame
+        df = pd.DataFrame(rows, columns=columns)
 
-        return len(rows)
+        # Handle timestamp conversion
+        df['timestamp'] = pd.to_datetime(df['timestamp'], format='mixed')
+
+        # Apply smoothing if needed
+        if smoothing_factor > 1:
+            # Create group labels for averaging
+            group_labels = np.arange(len(df)) // smoothing_factor
+            df = df.groupby(group_labels).agg({
+                'timestamp': 'mean',
+                **{col: 'mean' for col in columns if col != 'timestamp'}
+            }).reset_index(drop=True)
+
+        # Export to CSV
+        full_path = os.path.join(self.output_folder, filename)
+        df['timestamp'] = df['timestamp'].dt.strftime("%Y-%m-%d %H:%M:%S.%f").str[:-3]
+        df.to_csv(full_path, index=False)
+
+        return len(df)

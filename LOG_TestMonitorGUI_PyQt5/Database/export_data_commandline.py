@@ -3,6 +3,8 @@ import csv
 import datetime
 import os
 import sys
+import pandas as pd
+import numpy as np
 
 def get_db_path():
     base_dir = os.path.expanduser("~/Documents/LOG_testing_monitor/LOG_TestMonitorGUI_PyQt5/Database/Data")
@@ -38,7 +40,7 @@ OPTIONS:
   -h, --help      Show this help message
 """)
 
-def export_table(table, columns, start_time, end_time, output_folder, filename):
+def export_table(table, columns, start_time, end_time, output_folder, filename, smoothing_factor=1):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(f"""
@@ -50,22 +52,23 @@ def export_table(table, columns, start_time, end_time, output_folder, filename):
     rows = cursor.fetchall()
     conn.close()
 
+    df = pd.DataFrame(rows, columns=columns)
+    df['timestamp'] = pd.to_datetime(df['timestamp'], format='mixed')
+
+    if smoothing_factor > 1:
+        group_labels = np.arange(len(df)) // smoothing_factor
+        df = df.groupby(group_labels).agg({
+            'timestamp': 'mean',
+            **{col: 'mean' for col in columns if col != 'timestamp'}
+        }).reset_index(drop=True)
+
     os.makedirs(output_folder, exist_ok=True)
     full_path = os.path.join(output_folder, filename)
+    df['timestamp'] = df['timestamp'].dt.strftime("%Y-%m-%d %H:%M:%S.%f").str[:-3]
+    df.to_csv(full_path, index=False)
 
-    with open(full_path, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(columns)
-        for row in rows:
-            ts = row[0]
-            if isinstance(ts, datetime.datetime):
-                ts_str = ts.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-            else:
-                ts_str = str(ts)
-            writer.writerow([ts_str] + list(row[1:]))
-
-    print(f"✅ Exported {len(rows)} rows from {table} to {full_path}")
-    return len(rows)
+    print(f"✅ Exported {len(df)} rows from {table} to {full_path}")
+    return len(df)
 
 if __name__ == "__main__":
     args = sys.argv[1:]
@@ -75,6 +78,7 @@ if __name__ == "__main__":
 
     output_folder = os.path.expanduser("~/Desktop/exportedData")
     export_load = export_accel = export_lc_offsets = export_accel_offsets = False
+    smoothing_factor = 1
 
     date_args = []
     i = 0
@@ -99,6 +103,8 @@ if __name__ == "__main__":
             export_accel_offsets = True
         elif opt == "--all":
             export_load = export_accel = export_lc_offsets = export_accel_offsets = True
+        elif opt == "--smooth":
+            smoothing_factor = int(options.pop(0))        
         else:
             print(f"❌ Unknown option: {opt}")
             print_usage()
