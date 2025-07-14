@@ -444,6 +444,9 @@ class MainWindow(QMainWindow):
         return mx, my, mz
 
     def update_display(self, timestamp, loads, accels, accel_on, accel_status):
+        if self.socket_thread is None:
+            return
+        
         axis_map = {
             "LC1": "Z", "LC2": "Y", "LC3": "Z",
             "LC4": "Y", "LC5": "Z", "LC6": "X",
