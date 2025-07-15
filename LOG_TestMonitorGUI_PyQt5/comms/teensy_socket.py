@@ -59,8 +59,8 @@ class TeensySocketThread(QThread):
         self.last_valid_accels = [0.0, 0.0, 0.0]  # Default accelerometer values
         self.last_flush = time.time()
 
-        # self.lc_zero_load_offset = [1.6378,	8.8097,	-6.3057, 1.1999, 1.2814, -0.0209] # PGA Bypassed
-        self.lc_zero_load_offset = [0.2378,	7.4097,	-7.7057, -0.2001, -0.1186, -1.4209] # PGA Enabled G = 1, less noisy 
+        # self.lc_zero_load_offset = [1.638, 8.810, -6.306, 1.200, 1.281, -0.021] # PGA Bypassed
+        self.lc_zero_load_offset = [0.238, 7.410, -7.706, -0.200, -0.119, -1.421] # PGA Enabled G = 1, less noisy 
 
 
         if not TeensySocketThread.first_connection_done or not TeensySocketThread.zeroed:
@@ -135,7 +135,9 @@ class TeensySocketThread(QThread):
                 if accel_on and not accel_stale:
                     self.accel_offset = accels[:]
                     self.zero_pending["accels"] = True
-                    self.emitter.log_message.emit(f"🔧 Zeroed accelerometer: {self.accel_offset}")
+                    self.emitter.log_message.emit(
+                    f"🔧 Zeroed accelerometer: {[round(val, 2) for val in self.accel_offset]}"
+                    )
         else:
             # Clear accelerometer offsets without zeroing
             self.accel_offset = [0.0, 0.0, 0.0]
