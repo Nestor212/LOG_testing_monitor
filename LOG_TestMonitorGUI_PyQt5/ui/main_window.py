@@ -2,7 +2,7 @@ from PyQt5.QtWidgets import (
     QMainWindow, QLabel, QPushButton, QLineEdit,
     QVBoxLayout, QHBoxLayout, QWidget, QGridLayout, 
     QFrame, QSizePolicy, QMessageBox, QCheckBox,
-    QComboBox
+    QComboBox, QTextEdit
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont, QColor, QPalette
@@ -42,9 +42,11 @@ class MainWindow(QMainWindow):
         self.signal_emitter = ParserEmitter()
         self.signal_emitter.new_data.connect(self.update_display)
         self.signal_emitter.update_sps.connect(self.update_sps_display)
+        self.signal_emitter.disconnected.connect(self.handle_disconnection)
+        self.signal_emitter.log_message.connect(self.log_message)
 
         # Fonts
-        font = QFont("Arial", 18, QFont.Bold)
+        font = QFont("Arial", 16, QFont.Bold)
         # Load cell labels
         self.labels = {}
         for lc in ["LC1", "LC2", "LC3", "LC4", "LC5", "LC6"]:
@@ -67,8 +69,7 @@ class MainWindow(QMainWindow):
         frame.setFrameStyle(QFrame.Panel | QFrame.Raised)
         frame.setLineWidth(3)
         frame.setLayout(grid)
-        frame.setFixedSize(420, 240)
-###################
+        frame.setFixedSize(600, 180)
 
         # Create the forces container widget
         forces_container = QWidget()
@@ -103,11 +104,6 @@ class MainWindow(QMainWindow):
         # Set layout to the container widget
         forces_container.setLayout(forces_container_layout)
 
-        # Add to your main layout (example)
-        # main_layout.addWidget(forces_container)
-
-
-###################
         # Acceleration Labels and SPS
         self.accel_led = QLabel()
         self.accel_led.setFixedSize(20, 20)
@@ -265,6 +261,17 @@ class MainWindow(QMainWindow):
         net_force_grid.addWidget(self.net_force_labels['Moment_Y']  , 3, 1)
         net_force_grid.addWidget(self.net_force_labels['Moment_Z'], 3, 2)
 
+        # Console output
+        self.console_output = QTextEdit()
+        self.console_output.setReadOnly(True)
+        self.console_output.setStyleSheet("""
+            background-color: #FFFFFF;
+            color: #000000;
+            font-family: monospace;
+            font-size: 12px;
+        """)
+        self.console_output.setFixedHeight(80)  # Adjust as needed
+
         # Main Layout
         main_layout = QVBoxLayout()
         main_layout.addLayout(conn_layout)
@@ -275,6 +282,7 @@ class MainWindow(QMainWindow):
         main_layout.addLayout(accel_header_layout)
         main_layout.addLayout(accel_grid)
         main_layout.addLayout(zero_grid)
+        main_layout.addWidget(self.console_output)
 
         container = QWidget()
         container.setLayout(main_layout)
@@ -295,6 +303,19 @@ class MainWindow(QMainWindow):
             writer = csv.writer(f)
             writer.writerow(["Timestamp", "LC_SPS", "Accel_SPS"])
 
+    def log_message(self, message):
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        self.console_output.append(f"[{timestamp}] {message}")
+
+    def handle_disconnection(self):
+        self.log_message("🔌 Disconnected signal received.")
+        if self.socket_thread:
+            self.socket_thread = None
+        self.connect_btn.setText("Connect")
+        self.update_led("red")
+        self.update_accel_led("red")
+        self.update_trigger_widget_states()
+
     def update_trigger_widget_states(self):
         trigger_enabled = self.trigger_checkbox.isChecked()
 
@@ -309,7 +330,7 @@ class MainWindow(QMainWindow):
             try:
                 value = float(self.trigger_input.text())
             except ValueError:
-                print("⚠ Invalid trigger value, must be float")
+                self.log_message("⚠ Invalid trigger value, must be float")
                 return
 
             if self.trigger_selector.currentText() == "Threshold":
@@ -317,7 +338,7 @@ class MainWindow(QMainWindow):
             elif self.trigger_selector.currentText() == "Delta":
                 self.socket_thread.trigger_mode = "Delta"
             self.socket_thread.trigger_value = value
-            print("Trigger values updated.")
+            self.log_message(f"Trigger value set to: {value}")
 
     def show_plot_window(self):
         plot_window = PlotWindow(self.signal_emitter)
@@ -373,26 +394,38 @@ class MainWindow(QMainWindow):
 
     def toggle_connection(self):
         if self.socket_thread and self.socket_thread.isRunning():
+            self.log_message("🛑 Disconnecting...")
             self.socket_thread.stop()
             self.socket_thread = None
             self.connect_btn.setText("Connect")
             self.update_led("red")
             self.update_accel_led("red")
-            self.update_trigger_widget_states()  # Disable trigger inputs when disconnected
+            self.update_trigger_widget_states()
+            self.load_offsets_checkbox.setEnabled(True)
         else:
             ip = self.ip_input.text().strip()
             if not ip:
+                self.log_message("⚠️ IP address is empty.")
                 return
+
+            # Prevent starting multiple threads
+            if self.socket_thread:
+                self.log_message("⚠️ Previous socket thread still exists. Cleaning up...")
+                self.socket_thread.stop()
+                self.socket_thread = None
+
+            self.log_message("🔗 Connecting...")
             self.update_led("yellow")
             self.socket_thread = TeensySocketThread(ip, self.port, self.signal_emitter)
-            self.initUI = False
             self.socket_thread.start()
             self.connect_btn.setText("Disconnect")
             self.update_led("green")
+            self.load_offsets_checkbox.setEnabled(False)
+
             if self.load_offsets_checkbox.isChecked():
                 self.socket_thread.load_last_offsets()
 
-            self.update_trigger_settings()         # Apply current GUI trigger config to thread
+            self.update_trigger_settings()
 
     def update_accel_led(self, color):
         palette = self.accel_led.palette()
@@ -531,7 +564,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         if self.socket_thread and self.socket_thread.isRunning():
-            print("🛑 Window closed — stopping socket thread...")
+            self.log_message("🛑 Window closed — stopping socket thread...")
             self.socket_thread.stop()
         event.accept()
 

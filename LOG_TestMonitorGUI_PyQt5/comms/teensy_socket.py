@@ -64,14 +64,12 @@ class TeensySocketThread(QThread):
 
 
         if not TeensySocketThread.first_connection_done or not TeensySocketThread.zeroed:
-            # print("🔌 First connection detected, initializing zero offsets.", flush=True)
             self.load_offsets = [0.0] * 6
             self.zero_pending = {"loads": False, "accels": False}
             TeensySocketThread.first_connection_done = True
         else:
-            # print("🔌 Subsequent connection detected, fetching latest zero offsets from DB.", flush=True)
             self.load_offsets = self.fetch_latest_load_offsets_from_db()
-            # print(f"🔌 Loaded offsets: {self.load_offsets}", flush=True)
+            # self.emitter.log_message.emit(f"🔌 Loaded offsets: {self.load_offsets}")
             self.zero_pending = {"loads": False, "accels": False}
 
         self.accel_offset = [0.0, 0.0, 0.0]
@@ -84,7 +82,8 @@ class TeensySocketThread(QThread):
     def load_last_offsets(self):
         """Load the last stored offsets from the database."""
         self.load_offsets = self.fetch_latest_load_offsets_from_db()
-        # print(f"🔌 Loaded offsets from DB: {self.load_offsets}", flush=True)
+        rounded_offsets = [round(val, 2) for val in self.load_offsets]
+        self.emitter.log_message.emit(f"🔌 Loaded offsets from DB: {rounded_offsets}")
         self.zero_pending["loads"] = False
         TeensySocketThread.zeroed = True  # Mark as zeroed to avoid re-zeroing on next connection
 
@@ -104,10 +103,10 @@ class TeensySocketThread(QThread):
             if row:
                 return list(row)
             else:
-                print("⚠ No load cell zero offsets found in DB, using zeros.")
+                self.emitter.log_message.emit("⚠ No load cell zero offsets found in DB, using zeros.")
                 return [0.0] * 6
         except Exception as e:
-            print(f"⚠ DB error fetching load offsets: {e}")
+            self.emitter.log_message.emit(f"⚠ DB error fetching load offsets: {e}")
             return [0.0] * 6
 
     def zero_loads(self, zeroing=False):
@@ -119,13 +118,15 @@ class TeensySocketThread(QThread):
                     load + offset for load, offset in zip(loads, self.load_offsets)
                 ]
                 self.zero_pending["loads"] = True
-                print(f"🔧 Zeroed load cells: {self.load_offsets}")
+                self.emitter.log_message.emit(
+                    f"🔧 Zeroed load cells: {[round(val, 2) for val in self.load_offsets]}"
+                )
         else:
             # Clear load offsets without zeroing
             TeensySocketThread.zeroed = False
             self.load_offsets = [0.0] * 6
             self.zero_pending["loads"] = False
-            print("🔧 Cleared load cell offsets.")
+            self.emitter.log_message.emit("🔧 Cleared load cell offsets.")
 
     def zero_accels(self, zeroing=False):
         if zeroing:
@@ -134,12 +135,12 @@ class TeensySocketThread(QThread):
                 if accel_on and not accel_stale:
                     self.accel_offset = accels[:]
                     self.zero_pending["accels"] = True
-                    print(f"🔧 Zeroed accelerometer: {self.accel_offset}")
+                    self.emitter.log_message.emit(f"🔧 Zeroed accelerometer: {self.accel_offset}")
         else:
             # Clear accelerometer offsets without zeroing
             self.accel_offset = [0.0, 0.0, 0.0]
             self.zero_pending["accels"] = False
-            print("🔧 Cleared accelerometer offsets.")
+            self.emitter.log_message.emit("🔧 Cleared accelerometer offsets.")
 
     def emit_loop(self):
         while self.running:
@@ -179,10 +180,10 @@ class TeensySocketThread(QThread):
             self.avg_accel_stale = False
 
     def run(self):
-        print("🔌 Starting socket thread.", flush=True)
+        self.emitter.log_message.emit("🔌 Starting socket thread.")
         buffer = ""
-        line_counter = 0
-        #last_debug_time = time.time()
+        self.inactivity_timeout = 2.0  # Seconds without data → auto disconnect
+
         if not hasattr(self, 'emit_thread_started'):
             threading.Thread(target=self.emit_loop, daemon=True).start()
             self.emit_thread_started = True
@@ -190,61 +191,68 @@ class TeensySocketThread(QThread):
         while self.running:
             try:
                 self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                self.s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 65536)
-                self.s.settimeout(5)
+                self.s.settimeout(3)  # Timeout for connect
                 self.s.connect((self.host, self.port))
+                self.s.settimeout(1)  # Shorter timeout for recv
+
                 self.s.sendall(b"HELLO\n")
                 time.sleep(0.1)
                 self.sync_time()
 
                 while self.running:
-                    # if time.time() - self.last_read_time > 0.1:
-                        # print(F"Elapsed time since last read: {time.time() - self.last_read_time:.2f} seconds", flush=True)
-                    
-                    self.last_read_time = time.time()
+                    if time.time() - self.last_read_time > self.inactivity_timeout:
+                        self.emitter.log_message.emit("⚠️ Inactivity timeout — auto-disconnecting.")
+                        self.emitter.disconnected.emit()
+                        self.stop()
+                        return
+
                     try:
                         chunk = self.s.recv(2048).decode(errors='ignore')
-                        # print(f"chunk: {chunk}", flush=True)
-                        if not chunk:
+                    except (socket.timeout, ConnectionResetError, OSError) as e:
+                        if self.running:
+                            self.emitter.log_message.emit(f"⚠️ Socket receive error: {e}")
+                            break
+                        else:
                             break
 
-                        buffer += chunk
-                        while '\n' in buffer:
-                            line, buffer = buffer.split('\n', 1)
-                            line = line.strip()
+                    if not chunk:
+                        self.emitter.log_message.emit("⚠️ Socket closed by teensy.")
+                        break
 
-                            if line.startswith("TS ") and line.count(' ') >= 12:
-                                t0 = time.time()
-                                self.handle_line(line)
-                                t1 = time.time()
-                                dt = (t1 - t0) * 1000  # ms
-                                # if dt > 2:  # flag slow lines
-                                #     print(f"🐢 handle_line took {dt:.2f} ms", flush=True)
-                                line_counter += 1
-                            else:
-                                print(f"⚠️ Malformed or partial line: {line}", flush=True)
+                    self.last_read_time = time.time()
+                    buffer += chunk
 
-                        # now = time.time()
-                        # if now - last_debug_time >= 1.0:
-                        #     print(f"📨 {line_counter} lines/sec", flush=True)
-                        #     line_counter = 0
-                        #     last_debug_time = now
+                    while '\n' in buffer:
+                        line, buffer = buffer.split('\n', 1)
+                        line = line.strip()
+                        if not line:
+                            continue  # Skip empty lines
+                        elif line.startswith("TS ") and line.count(' ') >= 12:
+                            self.handle_line(line)
+                        elif line.startswith("LC") or line.startswith("Time"):
+                            self.emitter.log_message.emit(f"Teensy says: {line}")
+                        elif line.startswith("\n"):
+                            continue
+                        else:
+                            self.emitter.log_message.emit(f"⚠️ Unparsed line: {line}")
 
-                        self.flush_logs()
+                    self.flush_logs()
 
-                    except socket.timeout:
-                        continue
-
-            except Exception as e:
-                print(f"⚠️ Socket error: {e}", flush=True)
-                time.sleep(2)
-
+            except (socket.timeout, ConnectionRefusedError, OSError) as e:
+                self.emitter.log_message.emit(f"⚠️ Connection error: {e}")
+                time.sleep(5)
             finally:
                 if self.s:
-                    self.s.sendall(b"D\n")
-                    time.sleep(0.1)
-                    self.s.close()
+                    try:
+                        self.s.sendall(b"D\n")
+                    except Exception:
+                        pass
+                    try:
+                        self.s.close()
+                    except Exception:
+                        pass
                     self.s = None
+                    self.emitter.disconnected.emit()
 
     def handle_line(self, line):
         try:
@@ -265,12 +273,13 @@ class TeensySocketThread(QThread):
             self._update_sps_counter(timestamp.timestamp(), bool(adjusted_accels))
 
         except Exception as e:
-            print(f"⚠️ Parse error: {e} — line: {line}", flush=True)
+            pass
+            # self.emitter.log_message.emit(f"⚠️ Parse error: {e} — line: {line}")
 
     def _parse_fields(self, line):
         fields = line[3:].strip().split()
         if len(fields) != 12:
-            print(f"⚠️ Malformed line: {line}", flush=True)
+            # self.emitter.log_message.emit(f"⚠️ Malformed line: {line}")
             return None
 
         raw_ts = float(fields[0])
@@ -283,6 +292,9 @@ class TeensySocketThread(QThread):
 
     def _update_trigger_logic(self, loads):
         if not self.trigger_enabled:
+            self.trigger_active = False
+            self.post_trigger_frames_remaining = 0
+            self.last_fz = None
             return
 
         fz = loads[0] + loads[2] + loads[4]
@@ -307,17 +319,15 @@ class TeensySocketThread(QThread):
 
         # 🔼 Trigger just activated
         if triggered:
-            # print("⚡ Trigger ON")
             self.trigger_active = True
             self.post_trigger_frames_remaining = 0
             self.db_load_buffer = list(self.pre_trigger_buffer)
-            print(f"Triggered. Db load buffer size: {len(self.db_load_buffer)}")
+            self.emitter.log_message.emit(f"Triggered at Fz = {round(fz, 1)} lbf. Trigger value = {self.trigger_value} lbf.")
             self.trigger_timestamp = datetime.datetime.now()
             self.emitter.trigger_started.emit(self.trigger_timestamp)           
 
         # 🔽 Start post-trigger countdown on falling edge
         elif untriggered and self.trigger_active and self.post_trigger_frames_remaining == 0:
-            # print("⏹ Trigger OFF (start delay)")
             self.post_trigger_frames_remaining = self.trigger_delay_frames
 
         # ⏳ Finish countdown if started
@@ -326,7 +336,6 @@ class TeensySocketThread(QThread):
 
             # When delay ends, finish session
             if self.post_trigger_frames_remaining == 0:
-                # print("🛑 Trigger DONE — flushing to log")
                 self.trigger_active = False
 
     def _process_loads(self, loads, timestamp):
@@ -434,7 +443,7 @@ class TeensySocketThread(QThread):
                     conn.commit()
                     conn.close()
                 except Exception as e:
-                    print(f"⚠️ DB writer error: {e}")
+                    self.emitter.log_message.emit(f"⚠️ DB writer error: {e}")
                 finally:
                     self.db_queue.task_done()
 
@@ -444,7 +453,6 @@ class TeensySocketThread(QThread):
             self.db_load_buffer.clear()
             self.accel_buffer.clear()
             return
-        # print("flushing logs.")
         now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
 
         payload = {
@@ -469,6 +477,14 @@ class TeensySocketThread(QThread):
             self.s.sendall(cmd.encode('utf-8'))
 
     def stop(self):
+        self.emitter.log_message.emit("🛑 Stopping socket thread.")
         self.running = False
+        try:
+            if self.s:
+                self.s.shutdown(socket.SHUT_RDWR)
+                self.s.close()
+                self.s = None
+        except Exception as e:
+            self.emitter.log_message.emit(f"⚠️ Socket close error during stop: {e}")
         self.quit()
         self.wait()
