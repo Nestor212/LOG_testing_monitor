@@ -324,21 +324,27 @@ class MainWindow(QMainWindow):
         self.trigger_label.setEnabled(not trigger_enabled)
 
     def update_trigger_settings(self):
-        if self.socket_thread:
-            self.socket_thread.trigger_enabled = self.trigger_checkbox.isChecked()
+        if not self.socket_thread:
+            return
+        self.socket_thread.trigger_enabled = self.trigger_checkbox.isChecked()
 
-            try:
-                value = float(self.trigger_input.text())
-            except ValueError:
-                self.log_message("⚠ Invalid trigger value, must be float")
-                return
+        try:
+            value = float(self.trigger_input.text())
+        except ValueError:
+            self.log_message("⚠ Invalid trigger value, must be float")
+            return
 
-            if self.trigger_selector.currentText() == "Threshold":
-                self.socket_thread.trigger_mode = "Threshold"
-            elif self.trigger_selector.currentText() == "Delta":
-                self.socket_thread.trigger_mode = "Delta"
-            self.socket_thread.trigger_value = value
-            self.log_message(f"Trigger value set to: {self.trigger_selector.currentText()} = {value} lbf")
+        if self.trigger_selector.currentText() == "Threshold":
+            self.socket_thread.trigger_mode = "Threshold"
+        elif self.trigger_selector.currentText() == "Delta":
+            self.socket_thread.trigger_mode = "Delta"
+        self.socket_thread.trigger_value = value
+
+        self.update_trigger_widget_states()
+        if self.socket_thread.trigger_enabled:
+            self.log_message(f"Trigger enabled: {self.socket_thread.trigger_mode} at {value} lbf")
+        else:
+            self.log_message("Trigger disabled")
 
     def show_plot_window(self):
         plot_window = PlotWindow(self.signal_emitter)
