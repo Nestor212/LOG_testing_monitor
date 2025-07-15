@@ -171,8 +171,8 @@ class MainWindow(QMainWindow):
 
         self.trigger_checkbox.stateChanged.connect(self.update_trigger_widget_states)
         self.trigger_checkbox.stateChanged.connect(self.update_trigger_settings)
-        self.trigger_selector.currentIndexChanged.connect(self.update_trigger_settings)
-        self.trigger_input.textChanged.connect(self.update_trigger_settings)
+        # self.trigger_selector.currentIndexChanged.connect(self.update_trigger_settings)
+        # self.trigger_input.textChanged.connect(self.update_trigger_settings)
 
         self.update_trigger_widget_states()
 
@@ -338,7 +338,7 @@ class MainWindow(QMainWindow):
             elif self.trigger_selector.currentText() == "Delta":
                 self.socket_thread.trigger_mode = "Delta"
             self.socket_thread.trigger_value = value
-            self.log_message(f"Trigger value set to: {value}")
+            self.log_message(f"Trigger value set to: {self.trigger_selector.currentText()} = {value} lbf")
 
     def show_plot_window(self):
         plot_window = PlotWindow(self.signal_emitter)
