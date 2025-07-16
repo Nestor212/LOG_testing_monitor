@@ -16,7 +16,7 @@ class SqlWorker(QObject):
             cursor.execute("""
                 SELECT timestamp, lc1, lc2, lc3, lc4, lc5, lc6
                 FROM load_cells
-                WHERE timestamp BETWEEN ? AND ?
+                WHERE timestamp >= ? AND timestamp < ?
                 ORDER BY timestamp
             """, (start_dt, end_dt))
             rows = cursor.fetchall()
