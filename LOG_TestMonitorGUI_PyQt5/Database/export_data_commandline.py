@@ -1,5 +1,6 @@
+#  python3 export_data_commandline.py "2025-07-15 10:57:00" "2025-07-15 10:57:01" --load_cells
+
 import sqlite3
-import csv
 import datetime
 import os
 import sys
@@ -7,7 +8,7 @@ import pandas as pd
 import numpy as np
 
 def get_db_path():
-    base_dir = os.path.expanduser("~/Documents/LOG_testing_monitor/LOG_TestMonitorGUI_PyQt5/Database/Data")
+    base_dir = os.path.expanduser("~/Documents/LOG_testing_monitor_PyQt5_RPi/LOG_TestMonitorGUI_PyQt5/Database/Data")
     return os.path.join(base_dir, "data_log.db")
 
 def get_connection():
@@ -19,15 +20,15 @@ def get_connection():
 
 def print_usage():
     print("""
-extract_data_commandline.py
+export_data_commandline.py
 
 Extract logged sensor data into CSV files.
 
 USAGE:
-  python3 extract_data_commandline.py YYYY-MM-DD [options]
+  python3 export_data_commandline.py YYYY-MM-DD [options]
       Export all data from that date (00:00:00 to 23:59:59)
 
-  python3 extract_data_commandline.py "YYYY-MM-DD HH:MM:SS" "YYYY-MM-DD HH:MM:SS" [options]
+  python3 export_data_commandline.py "YYYY-MM-DD HH:MM:SS" "YYYY-MM-DD HH:MM:SS" [options]
       Export data from custom start and end time
 
 OPTIONS:
@@ -47,7 +48,7 @@ def export_table(table, columns, start_time, end_time, output_folder, filename, 
     cursor.execute(f"""
         SELECT {', '.join(columns)}
         FROM {table}
-        WHERE timestamp BETWEEN ? AND ?
+        WHERE timestamp >= ? AND timestamp < ?
         ORDER BY timestamp
     """, (start_time, end_time))
     rows = cursor.fetchall()
@@ -118,7 +119,7 @@ if __name__ == "__main__":
         if len(date_args) == 1:
             date = datetime.datetime.strptime(date_args[0], "%Y-%m-%d").date()
             start = datetime.datetime.combine(date, datetime.time.min)
-            end = datetime.datetime.combine(date, datetime.time.max)
+            end = datetime.datetime.combine(date, datetime.time(23, 59, 59))
         elif len(date_args) == 2:
             start = datetime.datetime.strptime(date_args[0], "%Y-%m-%d %H:%M:%S")
             end = datetime.datetime.strptime(date_args[1], "%Y-%m-%d %H:%M:%S")

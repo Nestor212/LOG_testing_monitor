@@ -80,8 +80,8 @@ class DataExportDialog(QDialog):
             QMessageBox.warning(self, "No folder", "Please select a destination folder.")
             return
 
-        start = self.start_dt.dateTime().toPyDateTime()
-        end = self.end_dt.dateTime().toPyDateTime()
+        start = self.start_dt.dateTime().toPyDateTime().replace(microsecond=0)
+        end = self.end_dt.dateTime().toPyDateTime().replace(microsecond=0)
         base = f"{start.strftime('%Y-%m-%d_%H-%M-%S')}_to_{end.strftime('%Y-%m-%d_%H-%M-%S')}"
         row_counts = []
 
@@ -118,13 +118,14 @@ class DataExportDialog(QDialog):
 
     def export_table(self, table, columns, start_time, end_time, filename):
         smoothing_factor = int(self.smoothing_combo.currentText())
+        print(f"Exporting {table} data from {start_time} to {end_time} with smoothing factor {smoothing_factor}")
 
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute(f"""
             SELECT {', '.join(columns)}
             FROM {table}
-            WHERE timestamp BETWEEN ? AND ?
+            WHERE timestamp >= ? AND timestamp < ?
             ORDER BY timestamp
         """, (start_time, end_time))
         rows = cursor.fetchall()
