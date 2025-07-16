@@ -518,6 +518,7 @@ class PlotWindow(QWidget):
             self.depth_input.setEnabled(True)
             self.feed_rate_input.setEnabled(True)
             self.pitch_input.setEnabled(True)
+            self.start_live_from_past_checkbox.setEnabled(True)
             return
         
         # Clear plot buffers
@@ -622,14 +623,14 @@ class PlotWindow(QWidget):
             y_vals = [self.y_data[i][nearest_index] for i in range(6)]
             # print(f"Clicked near: {self.x_data[nearest_index]} -> {y_vals}")
 
-    def hideEvent(self, event):
-        if self.live_timer.isActive():
-            print("[PlotWindow] Window hidden — live timer paused.")
-            self.live_timer.stop()
-            self.start_btn.setText("Start")
-            self.live_checkbox.setEnabled(True)
-            self.window_selector.setEnabled(True)
-        event.accept()
+    # def hideEvent(self, event):
+    #     if self.live_timer.isActive():
+    #         print("[PlotWindow] Window hidden — live timer paused.")
+    #         self.live_timer.stop()
+    #         self.start_btn.setText("Start")
+    #         self.live_checkbox.setEnabled(True)
+    #         self.window_selector.setEnabled(True)
+    #     event.accept()
 
     def closeEvent(self, event):
         print("[PlotWindow] Window closed.")
