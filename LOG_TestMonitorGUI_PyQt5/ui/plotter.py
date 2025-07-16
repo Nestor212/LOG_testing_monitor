@@ -494,12 +494,12 @@ class PlotWindow(QWidget):
             self.live_window_minutes = 1  # Default fallback
 
         avg_n = int(self.smoothing_selector.currentText().split()[0])
-        if avg_n <= 16:
-            self.max_live_points = self.live_window_minutes * 60 * 4  # 4 Hz
-        elif avg_n <= 32:
-            self.max_live_points = self.live_window_minutes * 60 * 2
-        else:
-            self.max_live_points = self.live_window_minutes * 60 * 1
+        # if avg_n <= 16:
+        #     self.max_live_points = self.live_window_minutes * 60 * 4  # 4 Hz
+        # elif avg_n <= 32:
+        #     self.max_live_points = self.live_window_minutes * 60 * 2
+        # else:
+        self.max_live_points = self.live_window_minutes * 60 * avg_n
 
     def toggle_live_plotting(self):
         self.update_plot_timer_interval()
