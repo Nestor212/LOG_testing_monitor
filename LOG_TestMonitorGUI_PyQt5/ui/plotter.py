@@ -100,6 +100,7 @@ class PlotWindow(QWidget):
         self.smoothing_selector = QComboBox()
         self.smoothing_selector.addItems(["1 (Raw)", "4", "16", "32", "64"])
         self.smoothing_selector.setCurrentIndex(0)
+        self.smoothing_selector.connect(self.update_parameters)
 
         # Display-only labels for parameters
         self.wheel_label = QLabel("Wheel: 60/40")
@@ -187,6 +188,10 @@ class PlotWindow(QWidget):
         self.setLayout(layout)
 
         self.toggle_live_mode(self.live_mode)
+
+    def update_parameters(self):
+        self.update_plot_timer_interval()
+        self.update_live_window()
 
     def open_param_editor(self):
         current = {
