@@ -506,8 +506,7 @@ class PlotWindow(QWidget):
             self.max_live_points = self.live_window_minutes * 60 * 1
 
     def toggle_live_plotting(self):
-        self.update_plot_timer_interval()
-        self.update_live_window()
+        self.update_parameters()
 
         if self.live_timer.isActive():
             self.live_timer.stop()
