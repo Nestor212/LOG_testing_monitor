@@ -228,7 +228,6 @@ class PlotWindow(QWidget):
                 params['pitch']
                 )
             )
-
             conn.commit()
             conn.close()
 
@@ -553,12 +552,11 @@ class PlotWindow(QWidget):
         self.live_timer.start()
         self.start_btn.setText("Stop")
         self.window_selector.setEnabled(False)
-        # self.plot_mode_selector.setEnabled(False)
-        # self.smoothing_selector.setEnabled(False)
         self.wheel_type_selector.setEnabled(False)
         self.depth_input.setEnabled(False)
         self.feed_rate_input.setEnabled(False)
         self.pitch_input.setEnabled(False)
+        self.start_live_from_past_checkbox.setEnabled(False)
 
     def request_latest_live_point(self):
         if getattr(self, 'waiting_for_pretrigger_plot', False):
@@ -611,7 +609,6 @@ class PlotWindow(QWidget):
             self.y_data = [collections.deque() for _ in range(6)]
 
         self.refresh_plot()
-
 
     def on_error(self, msg):
         print(f"[SqlWorker] Error: {msg}")
