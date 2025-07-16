@@ -571,8 +571,8 @@ class PlotWindow(QWidget):
         for i in range(6):
             self.y_data[i].append(values[i])
 
-        # Only trim if we're not showing historical range
-        if not self.appending_live_data:
+        # Only trim if we're not starting from past data
+        if not self.start_live_from_past_checkbox.isChecked():
             while len(self.x_data) > self.max_live_points:
                 self.x_data.popleft()
                 for i in range(6):
