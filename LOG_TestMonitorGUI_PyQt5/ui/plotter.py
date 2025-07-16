@@ -19,13 +19,16 @@ import datetime
 
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QCheckBox, QComboBox, QDateTimeEdit, QLineEdit, QGridLayout
+    QCheckBox, QComboBox, QDateTimeEdit, QLineEdit, QDialog,
+    QGridLayout
 )
 from PyQt5.QtCore import QDateTime, QTimer, QThread
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas, NavigationToolbar2QT as NavigationToolbar
 from ui.sql_worker import SqlWorker
 from comms.parser_emitter import ParserEmitter
+from ui.edit_params_dialog import EditParamsDialog
+from Database.db import get_connection
 
 import matplotlib.ticker as ticker
 import time
@@ -98,28 +101,29 @@ class PlotWindow(QWidget):
         self.smoothing_selector.addItems(["1 (Raw)", "4", "16", "32", "64"])
         self.smoothing_selector.setCurrentIndex(0)
 
+        # Display-only labels for parameters
+        self.wheel_label = QLabel("Wheel: 60/40")
+        self.depth_label = QLabel("Depth (mm): 0.0")
+        self.feed_label = QLabel("Feed (mm/s): 0.0")
+        self.pitch_label = QLabel("Pitch (mm): 0.0")
+
+        # Edit button
+        self.edit_params_btn = QPushButton("Edit")
+        self.edit_params_btn.clicked.connect(self.open_param_editor)
+
         self.wheel_type_selector = QComboBox()
-        self.wheel_type_selector.addItems(["0.0", "0.0"])
+        self.wheel_type_selector.addItems(["60/40", "120"])
 
         self.depth_input = QLineEdit("0.0")
         self.feed_rate_input = QLineEdit("0.0")
         self.pitch_input = QLineEdit("0.0")
 
         params_layout = QHBoxLayout()
-        params_layout.addWidget(QLabel("Plot:"))
-        params_layout.addWidget(self.plot_data_selector)
-        params_layout.addWidget(QLabel("Mode:"))
-        params_layout.addWidget(self.plot_mode_selector)
-        params_layout.addWidget(QLabel("Smooth:"))
-        params_layout.addWidget(self.smoothing_selector)
-        params_layout.addWidget(QLabel("Wheel:"))
-        params_layout.addWidget(self.wheel_type_selector)
-        params_layout.addWidget(QLabel("Depth (mm):"))
-        params_layout.addWidget(self.depth_input)
-        params_layout.addWidget(QLabel("Feed (mm/s):"))
-        params_layout.addWidget(self.feed_rate_input)
-        params_layout.addWidget(QLabel("Pitch (mm):"))
-        params_layout.addWidget(self.pitch_input)
+        params_layout.addWidget(self.wheel_label)
+        params_layout.addWidget(self.depth_label)
+        params_layout.addWidget(self.feed_label)
+        params_layout.addWidget(self.pitch_label)
+        params_layout.addWidget(self.edit_params_btn)
 
         self.live_checkbox = QCheckBox("Live")
         self.live_checkbox.setChecked(True)
@@ -141,6 +145,12 @@ class PlotWindow(QWidget):
         live_control_layout.addWidget(self.start_live_from_past_checkbox)
         live_control_layout.addWidget(QLabel("Window:"))
         live_control_layout.addWidget(self.window_selector)
+        live_control_layout.addWidget(QLabel("Plot:"))
+        live_control_layout.addWidget(self.plot_data_selector)
+        live_control_layout.addWidget(QLabel("Mode:"))
+        live_control_layout.addWidget(self.plot_mode_selector)
+        live_control_layout.addWidget(QLabel("Smooth:"))
+        live_control_layout.addWidget(self.smoothing_selector)
         live_control_layout.addWidget(self.start_btn)
         live_control_layout.addStretch()
 
@@ -169,14 +179,53 @@ class PlotWindow(QWidget):
         hist_control_layout.addStretch()
 
         layout = QVBoxLayout()
-        layout.addLayout(params_layout)
         layout.addLayout(live_control_layout)
         layout.addLayout(hist_control_layout)
+        layout.addLayout(params_layout)
         layout.addWidget(self.canvas)
         layout.insertWidget(0, self.toolbar)
         self.setLayout(layout)
 
         self.toggle_live_mode(self.live_mode)
+
+    def open_param_editor(self):
+        current = {
+            "wheel": self.wheel_label.text().split(": ")[1],
+            "depth": float(self.depth_label.text().split(": ")[1]),
+            "feed": float(self.feed_label.text().split(": ")[1]),
+            "pitch": float(self.pitch_label.text().split(": ")[1]),
+        }
+
+        dlg = EditParamsDialog(current, self)
+        if dlg.exec_() == QDialog.Accepted:
+            params = dlg.get_params()
+            self.wheel_label.setText(f"Wheel: {params['wheel']}")
+            self.depth_label.setText(f"Depth (mm): {params['depth']}")
+            self.feed_label.setText(f"Feed (mm/s): {params['feed']}")
+            self.pitch_label.setText(f"Pitch (mm): {params['pitch']}")
+
+            # Prepare DB insert
+            now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+            conn = get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                INSERT INTO log_config (
+                    timestamp, wheel_type, depth, feed_rate, pitch
+                ) VALUES (?, ?, ?, ?, ?)
+                """, 
+                (
+                now,
+                params['wheel'],
+                params['depth'],
+                params['feed'],
+                params['pitch']
+                )
+            )
+
+            conn.commit()
+            conn.close()
 
     def load_pretrigger_plot_data(self, trigger_time):
         print(f"🔄 Trigger received at {trigger_time} — loading pre-trigger data...")
@@ -445,7 +494,12 @@ class PlotWindow(QWidget):
             self.live_window_minutes = 1  # Default fallback
 
         avg_n = int(self.smoothing_selector.currentText().split()[0])
-        self.max_live_points = self.live_window_minutes * 60 * avg_n
+        if avg_n <= 16:
+            self.max_live_points = self.live_window_minutes * 60 * 4  # 4 Hz
+        elif avg_n <= 32:
+            self.max_live_points = self.live_window_minutes * 60 * 2
+        else:
+            self.max_live_points = self.live_window_minutes * 60 * 1
 
     def toggle_live_plotting(self):
         self.update_plot_timer_interval()
@@ -493,8 +547,8 @@ class PlotWindow(QWidget):
         self.live_timer.start()
         self.start_btn.setText("Stop")
         self.window_selector.setEnabled(False)
-        self.plot_mode_selector.setEnabled(False)
-        self.smoothing_selector.setEnabled(False)
+        # self.plot_mode_selector.setEnabled(False)
+        # self.smoothing_selector.setEnabled(False)
         self.wheel_type_selector.setEnabled(False)
         self.depth_input.setEnabled(False)
         self.feed_rate_input.setEnabled(False)

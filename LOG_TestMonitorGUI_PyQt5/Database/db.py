@@ -57,6 +57,17 @@ def initialize_db():
         );
     """)
 
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS log_config (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp DATETIME,
+            wheel_type TEXT,
+            depth REAL,
+            feed_rate REAL,
+            pitch REAL
+        );
+    """)
+
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_timestamp ON load_cells(timestamp);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_accel_timestamp ON accelerometer(timestamp);")
 

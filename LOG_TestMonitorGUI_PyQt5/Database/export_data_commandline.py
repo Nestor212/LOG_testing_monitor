@@ -8,7 +8,13 @@ import pandas as pd
 import numpy as np
 
 def get_db_path():
-    base_dir = os.path.expanduser("~/Documents/LOG_testing_monitor_PyQt5_RPi/LOG_TestMonitorGUI_PyQt5/Database/Data")
+    if getattr(sys, 'frozen', False):
+        # PyInstaller executable
+        base_dir = os.path.expanduser("~/Documents/LOG_testing_monitor/LOG_TestMonitorGUI_PyQt5/Database/Data")
+    else:
+        # Running from source
+        base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Data")
+    
     return os.path.join(base_dir, "data_log.db")
 
 def get_connection():

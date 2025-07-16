@@ -47,9 +47,12 @@ class DataExportDialog(QDialog):
         self.cb_lc_offsets.setChecked(True)
         self.cb_accel_offsets = QCheckBox("Export Accelerometer Zero Offsets")
         self.cb_accel_offsets.setChecked(True)
+        self.cb_log_config = QCheckBox("Export LOG Config")
+        self.cb_log_config.setChecked(True)
+        layout.addWidget(self.cb_log_config)
         layout.addWidget(self.cb_load_cells)
-        layout.addWidget(self.cb_accel)
         layout.addWidget(self.cb_lc_offsets)
+        layout.addWidget(self.cb_accel)
         layout.addWidget(self.cb_accel_offsets)
 
         # Folder selector
@@ -109,6 +112,12 @@ class DataExportDialog(QDialog):
                                       ["timestamp", "ax_offset", "ay_offset", "az_offset"],
                                       start, end, f"accelerometer_zero_offsets_{base}.csv")
                 row_counts.append(f"Accelerometer Zero Offsets: {n}")
+
+            if self.cb_log_config.isChecked():
+                n = self.export_table("log_config",
+                                    ["timestamp", "wheel_type", "depth", "feed_rate", "pitch"],
+                                    start, end, f"log_config_{base}.csv")
+                row_counts.append(f"Config Log: {n}")
 
             summary = "\n".join(row_counts)
             QMessageBox.information(self, "Export Complete", f"✅ Data export complete.\n\n{summary}")
