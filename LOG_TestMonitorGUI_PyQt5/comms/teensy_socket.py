@@ -195,7 +195,7 @@ class TeensySocketThread(QThread):
                 self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self.s.settimeout(3)  # Connect timeout
                 self.s.connect((self.host, self.port))
-                self.s.settimeout(1)  # Read timeout for recv
+                self.s.settimeout(2)  # Read timeout for recv
 
                 self.emitter.log_message.emit("Connected to Teensy.")
                 self.s.sendall(b"HELLO\n")
