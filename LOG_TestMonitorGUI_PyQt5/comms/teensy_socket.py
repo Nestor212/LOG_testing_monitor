@@ -183,9 +183,9 @@ class TeensySocketThread(QThread):
 
     def run(self):
         self.emitter.log_message.emit("🔌 Starting socket thread.")
-        buffer = ""
-        self.inactivity_timeout = 2.0  # Seconds without data → auto disconnect
+        self.running = True
 
+        # Start emit loop if not already
         if not hasattr(self, 'emit_thread_started'):
             threading.Thread(target=self.emit_loop, daemon=True).start()
             self.emit_thread_started = True
@@ -193,68 +193,153 @@ class TeensySocketThread(QThread):
         while self.running:
             try:
                 self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                self.s.settimeout(3)  # Timeout for connect
+                self.s.settimeout(3)  # Connect timeout
                 self.s.connect((self.host, self.port))
-                self.s.settimeout(1)  # Shorter timeout for recv
+                self.s.settimeout(1)  # Read timeout for recv
 
+                self.emitter.log_message.emit("Connected to Teensy.")
                 self.s.sendall(b"HELLO\n")
                 time.sleep(0.1)
                 self.sync_time()
 
-                while self.running:
-                    if time.time() - self.last_read_time > self.inactivity_timeout:
-                        self.emitter.log_message.emit("⚠️ Inactivity timeout — auto-disconnecting.")
-                        self.emitter.disconnected.emit()
-                        self.stop()
-                        return
-
-                    try:
-                        chunk = self.s.recv(2048).decode(errors='ignore')
-                    except (socket.timeout, ConnectionResetError, OSError) as e:
-                        if self.running:
-                            self.emitter.log_message.emit(f"⚠️ Socket receive error: {e}")
-                            break
-                        else:
-                            break
-
-                    if not chunk:
-                        self.emitter.log_message.emit("⚠️ Socket closed by teensy.")
-                        break
-
-                    self.last_read_time = time.time()
-                    buffer += chunk
-
-                    while '\n' in buffer:
-                        line, buffer = buffer.split('\n', 1)
-                        line = line.strip()
-                        if not line:
-                            continue  # Skip empty lines
-                        elif line.startswith("TS ") and line.count(' ') >= 12:
-                            self.handle_line(line)
-                        elif line.startswith("LC") or line.startswith("Time"):
-                            self.emitter.log_message.emit(f"Teensy says: {line}")
-                        elif line.startswith("\n"):
-                            continue
-                        else:
-                            self.emitter.log_message.emit(f"⚠️ Unparsed line: {line}")
-
-                    self.flush_logs()
+                self._recv_loop()
 
             except (socket.timeout, ConnectionRefusedError, OSError) as e:
-                self.emitter.log_message.emit(f"⚠️ Connection error: {e}")
-                time.sleep(5)
+                self.emitter.log_message.emit(f"Socket error: {e}")
+
             finally:
-                if self.s:
-                    try:
-                        self.s.sendall(b"D\n")
-                    except Exception:
-                        pass
-                    try:
-                        self.s.close()
-                    except Exception:
-                        pass
-                    self.s = None
-                    self.emitter.disconnected.emit()
+                self._cleanup_socket()
+                time.sleep(1)  # Delay before retry
+
+    def _recv_loop(self):
+        buffer = ""
+        self.last_read_time = time.time()
+
+        while self.running:
+            try:
+                chunk = self.s.recv(2048).decode(errors='ignore')
+
+                if not chunk:
+                    raise ConnectionResetError("Socket closed by peer.")
+
+                self.last_read_time = time.time()
+                buffer += chunk
+
+                while '\n' in buffer:
+                    line, buffer = buffer.split('\n', 1)
+                    self.handle_line(line.strip())
+
+                self.flush_logs()
+
+            except socket.timeout:
+                # Minor network hiccup — just continue
+                continue
+
+            except (ConnectionResetError, OSError) as e:
+                self.emitter.log_message.emit(f"Connection interrupted: {e}")
+                break  # Exit to reconnect
+
+            # Watchdog check happens **outside exceptions** for normal flow too
+            if time.time() - self.last_read_time > 2:
+                self.emitter.log_message.emit("Watchdog timeout: No data received in 2s. Forcing reconnect.")
+                break
+
+    def _cleanup_socket(self):
+        try:
+            if self.s:
+                self.s.shutdown(socket.SHUT_RDWR)
+        except Exception:
+            pass
+        try:
+            if self.s:
+                self.s.close()
+        except Exception:
+            pass
+        self.s = None
+
+        self.emitter.log_message.emit("🔌 Socket closed. Cleaning up.")
+        self.emitter.disconnected.emit()
+
+        # Clear buffers
+        self.avg_load_buffer.clear()
+        self.avg_accel_buffer.clear()
+        self.db_load_buffer.clear()
+        self.pre_trigger_buffer.clear()
+
+    # def run(self):
+    #     self.emitter.log_message.emit("🔌 Starting socket thread.")
+    #     buffer = ""
+    #     self.inactivity_timeout = 2.0  # Seconds without data → auto disconnect
+
+    #     if not hasattr(self, 'emit_thread_started'):
+    #         threading.Thread(target=self.emit_loop, daemon=True).start()
+    #         self.emit_thread_started = True
+
+    #     while self.running:
+    #         try:
+    #             self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    #             self.s.settimeout(3)  # Timeout for connect
+    #             self.s.connect((self.host, self.port))
+    #             self.s.settimeout(1)  # Shorter timeout for recv
+
+    #             self.s.sendall(b"HELLO\n")
+    #             time.sleep(0.1)
+    #             self.sync_time()
+
+    #             while self.running:
+    #                 if time.time() - self.last_read_time > self.inactivity_timeout:
+    #                     self.emitter.log_message.emit("⚠️ Inactivity timeout — auto-disconnecting.")
+    #                     self.emitter.disconnected.emit()
+    #                     self.stop()
+    #                     return
+
+    #                 try:
+    #                     chunk = self.s.recv(2048).decode(errors='ignore')
+    #                 except (socket.timeout, ConnectionResetError, OSError) as e:
+    #                     if self.running:
+    #                         self.emitter.log_message.emit(f"⚠️ Socket receive error: {e}")
+    #                         break
+    #                     else:
+    #                         break
+
+    #                 if not chunk:
+    #                     self.emitter.log_message.emit("⚠️ Socket closed by teensy.")
+    #                     break
+
+    #                 self.last_read_time = time.time()
+    #                 buffer += chunk
+
+    #                 while '\n' in buffer:
+    #                     line, buffer = buffer.split('\n', 1)
+    #                     line = line.strip()
+    #                     if not line:
+    #                         continue  # Skip empty lines
+    #                     elif line.startswith("TS ") and line.count(' ') >= 12:
+    #                         self.handle_line(line)
+    #                     elif line.startswith("LC") or line.startswith("Time"):
+    #                         self.emitter.log_message.emit(f"Teensy says: {line}")
+    #                     elif line.startswith("\n"):
+    #                         continue
+    #                     else:
+    #                         self.emitter.log_message.emit(f"⚠️ Unparsed line: {line}")
+
+    #                 self.flush_logs()
+
+    #         except (socket.timeout, ConnectionRefusedError, OSError) as e:
+    #             self.emitter.log_message.emit(f"⚠️ Connection error: {e}")
+    #             time.sleep(5)
+    #         finally:
+    #             if self.s:
+    #                 try:
+    #                     self.s.sendall(b"D\n")
+    #                 except Exception:
+    #                     pass
+    #                 try:
+    #                     self.s.close()
+    #                 except Exception:
+    #                     pass
+    #                 self.s = None
+    #                 self.emitter.disconnected.emit()
 
     def handle_line(self, line):
         try:

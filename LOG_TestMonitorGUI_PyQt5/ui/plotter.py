@@ -238,7 +238,7 @@ class PlotWindow(QWidget):
 
         self.appending_live_data = False  # 🚫 Block appending until preload finishes
         self.waiting_for_pretrigger_plot = True
-        time.sleep(0.1)  # Give UI a moment to update
+        time.sleep(0.2)  # Give UI a moment to update
         self.worker.query_range(pre_time, trigger_time, avg_n)
 
     def update_plot_timer_interval(self):
@@ -459,6 +459,7 @@ class PlotWindow(QWidget):
         start_dt = self.start_time_edit.dateTime().toPyDateTime()
         end_dt = self.end_time_edit.dateTime().toPyDateTime()
         avg_n = int(self.averaging_selector.currentText().split()[0])
+        self.appending_live_data = False  # Disable appending for historical plots
         self.worker.query_range(start_dt, end_dt, avg_n)
 
     def toggle_live_mode(self, checked):
@@ -589,7 +590,21 @@ class PlotWindow(QWidget):
         Called when historical data (e.g., pre-trigger) is loaded.
         If self.waiting_for_pretrigger_plot is True, this data is pre-trigger and
         appending of live data will start only after this is loaded.
+
+        Three Use cases:
+        1. Pre-trigger data loaded: self.waiting_for_pretrigger_plot is True
+        2. Historical plot request: self.waiting_for_pretrigger_plot is False
+        3. Starting live mode from past: self.waiting_for_pretrigger_plot is False
+
+        In the first case, we wait for the pre-trigger data to load before enabling live appending.
+        In the second case, we just load the historical data into the plot buffers.
+        In the third case, we also load historical data but then enable live appending.
+
+        In all cases, we clear the plot buffers and load the data for a fresh plot.
         """
+        self.x_data.clear()
+        self.y_data = [collections.deque() for _ in range(6)]
+    
         for dt, loads in data:
             self.x_data.append(dt)
             for i in range(6):
@@ -603,10 +618,8 @@ class PlotWindow(QWidget):
             self.appending_live_data = True
             # print("[PlotWindow] ✅ Pre-trigger data loaded — now accepting live updates")
 
-        # Clear existing data if not appending
-        if not self.appending_live_data:
-            self.x_data.clear()
-            self.y_data = [collections.deque() for _ in range(6)]
+        if self.start_live_from_past_checkbox.isChecked():
+            self.appending_live_data = True
 
         self.refresh_plot()
 
