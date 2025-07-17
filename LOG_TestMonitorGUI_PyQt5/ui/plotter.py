@@ -188,6 +188,7 @@ class PlotWindow(QWidget):
         self.setLayout(layout)
 
         self.toggle_live_mode(self.live_mode)
+        self.catch_up_mode = False
 
     def update_parameters(self):
         self.update_plot_timer_interval()
@@ -289,6 +290,22 @@ class PlotWindow(QWidget):
             self.individual_lines = []
 
         self.canvas.draw()
+        
+    def check_lag_and_throttle(self):
+        latest_time = self.x_data[-1]
+        now = datetime.datetime.now()
+        lag_sec = (now - latest_time).total_seconds()
+
+        if lag_sec > 2:
+            if not self.catch_up_mode:
+                print(f"⚠️ Lag: {lag_sec:.2f}s behind. Slowing refresh.")
+                self.catch_up_mode = True
+                self.live_timer.setInterval(2000)
+        else:
+            if self.catch_up_mode:
+                print("✅ Caught up. Restoring normal refresh.")
+                self.catch_up_mode = False
+                self.update_plot_timer_interval()
 
     def compute_moments(self):
         """
@@ -338,112 +355,192 @@ class PlotWindow(QWidget):
 
         return moment_x, moment_y, moment_z
 
-    def refresh_plot(self):
+    def prepare_force_data(self):
         plot_data = self.plot_data_selector.currentText()
-        plot_mode = self.plot_mode_selector.currentText()
 
-        # Determine which data to plot
         if plot_data == "Fx/Fy/Fz vs Time":
-            data_indices = {
-                "Fx": [5],        # LC6 (X)
-                "Fy": [1, 3],     # LC2, LC4 (Y)
-                "Fz": [0, 2, 4]   # LC1, LC3, LC5 (Z)
-            }
-            labels = ["Fx", "Fy", "Fz"]
-        elif plot_data == "Mx/My/Mz vs Time":
-            labels = ["Mx", "My", "Mz"]
+            data_indices = {"Fx": [5], "Fy": [1, 3], "Fz": [0, 2, 4]}
         elif plot_data == "All Load Cells (F1–F6) vs Time":
             data_indices = {f"F{i+1}": [i] for i in range(6)}
-            labels = list(data_indices.keys())
         elif plot_data == "Axial Loads (Z: F1, F3, F5) vs Time":
             data_indices = {"F1": [0], "F3": [2], "F5": [4]}
-            labels = list(data_indices.keys())
         elif plot_data == "Lateral Loads (Y: F2, F4) vs Time":
             data_indices = {"F2": [1], "F4": [3]}
-            labels = list(data_indices.keys())
         elif plot_data == "F6 (X) vs Time":
             data_indices = {"F6": [5]}
-            labels = ["F6"]
         else:
-            print("⚠ Unknown plot type")
+            print("⚠️ Unknown plot type")
+            return [], []
+
+        labels = list(data_indices.keys())
+        data_series = [
+            [sum(self.y_data[k][j] for k in data_indices[label]) for j in range(len(self.x_data))]
+            for label in labels
+        ]
+
+        return data_series, labels
+
+    def update_lines(self, time_data, data_series, labels):
+        for i, data in enumerate(data_series):
+            self.individual_lines[i].set_data(time_data, data)
+
+    def update_subplots(self, time_data, data_series, labels):
+        for i, data in enumerate(data_series):
+            ax = self.axes[i]
+            ax.clear()
+            ax.plot(time_data, data, label=labels[i])
+            ax.set_ylabel(labels[i])
+            ax.legend(fontsize=7)
+            ax.grid(True)
+
+    def handle_axes_formatting(self, labels, mode):
+        if mode == "Single Plot":
+            self.ax.relim()
+            self.ax.autoscale_view()
+            self.ax.legend([line.get_label() for line in self.individual_lines[:len(labels)]])
+            self.ax.set_xlabel("Time")
+            self.ax.grid(True)
+            self.ax.xaxis.set_major_formatter(ticker.FuncFormatter(format_msec))
+        else:
+            self.axes[-1].set_xlabel("Time")
+            self.axes[-1].xaxis.set_major_formatter(ticker.FuncFormatter(format_msec))
+
+        self.canvas.figure.autofmt_xdate()
+
+    def refresh_plot(self):
+        if not self.x_data:
             return
-
-        mode_number = 1 if plot_mode == "Single Plot" else 2
-
-        if getattr(self, 'current_mode', None) != (plot_data, mode_number):
-            self.rebuild_plot_layout(plot_data, mode_number)
-            self.current_mode = (plot_data, mode_number)
 
         time_data = list(self.x_data)
 
+        self.check_lag_and_throttle()
+
+        plot_data = self.plot_data_selector.currentText()
+        plot_mode = self.plot_mode_selector.currentText()
+
         if plot_data == "Mx/My/Mz vs Time":
-            labels = ["Mx", "My", "Mz"]
             moment_x, moment_y, moment_z = self.compute_moments()
-
-            if mode_number == 1:
-                self.individual_lines[0].set_data(time_data, moment_x)
-                self.individual_lines[1].set_data(time_data, moment_y)
-                self.individual_lines[2].set_data(time_data, moment_z)
-
-                self.ax.relim()
-                self.ax.autoscale_view()
-                self.ax.set_xlabel("Time")
-                self.ax.set_ylabel("Moment (lbf-in)")
-                self.ax.legend(["Mx", "My", "Mz"])
-                self.ax.grid(True)
-                self.ax.xaxis.set_major_formatter(ticker.FuncFormatter(format_msec))
-            else:
-                self.axes[0].clear()
-                self.axes[0].plot(time_data, moment_x, label="Mx")
-                self.axes[0].set_ylabel("Mx")
-                self.axes[0].legend(fontsize=7)
-                self.axes[0].grid(True)
-
-                self.axes[1].clear()
-                self.axes[1].plot(time_data, moment_y, label="My")
-                self.axes[1].set_ylabel("My")
-                self.axes[1].legend(fontsize=7)
-                self.axes[1].grid(True)
-
-                self.axes[2].clear()
-                self.axes[2].plot(time_data, moment_z, label="Mz")
-                self.axes[2].set_ylabel("Mz")
-                self.axes[2].legend(fontsize=7)
-                self.axes[2].grid(True)
-
-                self.axes[-1].set_xlabel("Time")
-                self.axes[-1].xaxis.set_major_formatter(ticker.FuncFormatter(format_msec))
-
+            data_series = [moment_x, moment_y, moment_z]
+            labels = ["Mx", "My", "Mz"]
         else:
-            for i, label in enumerate(labels):
-                indices = data_indices[label]
-                vals = [sum(self.y_data[k][j] for k in indices) for j in range(len(self.x_data))]
-                # vals = smooth(vals, smoothing_n)
+            data_series, labels = self.prepare_force_data()
 
-                if mode_number == 1:
-                    self.individual_lines[i].set_data(time_data, vals)
-                else:
-                    ax = self.axes[i]
-                    ax.clear()
-                    ax.plot(time_data, vals, label=label)
-                    ax.set_ylabel(label)
-                    ax.legend(fontsize=7)
-                    ax.grid(True)
+        if plot_mode == "Single Plot":
+            self.update_lines(time_data, data_series, labels)
+        else:
+            self.update_subplots(time_data, data_series, labels)
 
-            if mode_number == 1:
-                self.ax.relim()
-                self.ax.autoscale_view()
-                self.ax.set_xlabel("Time")
-                self.ax.set_ylabel("Force")
-                self.ax.legend([line.get_label() for line in self.individual_lines[:len(labels)]])
-                self.ax.grid(True)
-                self.ax.xaxis.set_major_formatter(ticker.FuncFormatter(format_msec))
-            else:
-                self.axes[-1].set_xlabel("Time")
-                self.axes[-1].xaxis.set_major_formatter(ticker.FuncFormatter(format_msec))
-
-        self.canvas.figure.autofmt_xdate()
+        self.handle_axes_formatting(labels, plot_mode)
         self.canvas.draw()
+
+
+
+    # def refresh_plot(self):
+    #     plot_data = self.plot_data_selector.currentText()
+    #     plot_mode = self.plot_mode_selector.currentText()
+
+    #     # Determine which data to plot
+    #     if plot_data == "Fx/Fy/Fz vs Time":
+    #         data_indices = {
+    #             "Fx": [5],        # LC6 (X)
+    #             "Fy": [1, 3],     # LC2, LC4 (Y)
+    #             "Fz": [0, 2, 4]   # LC1, LC3, LC5 (Z)
+    #         }
+    #         labels = ["Fx", "Fy", "Fz"]
+    #     elif plot_data == "Mx/My/Mz vs Time":
+    #         labels = ["Mx", "My", "Mz"]
+    #     elif plot_data == "All Load Cells (F1–F6) vs Time":
+    #         data_indices = {f"F{i+1}": [i] for i in range(6)}
+    #         labels = list(data_indices.keys())
+    #     elif plot_data == "Axial Loads (Z: F1, F3, F5) vs Time":
+    #         data_indices = {"F1": [0], "F3": [2], "F5": [4]}
+    #         labels = list(data_indices.keys())
+    #     elif plot_data == "Lateral Loads (Y: F2, F4) vs Time":
+    #         data_indices = {"F2": [1], "F4": [3]}
+    #         labels = list(data_indices.keys())
+    #     elif plot_data == "F6 (X) vs Time":
+    #         data_indices = {"F6": [5]}
+    #         labels = ["F6"]
+    #     else:
+    #         print("⚠ Unknown plot type")
+    #         return
+
+    #     mode_number = 1 if plot_mode == "Single Plot" else 2
+
+    #     if getattr(self, 'current_mode', None) != (plot_data, mode_number):
+    #         self.rebuild_plot_layout(plot_data, mode_number)
+    #         self.current_mode = (plot_data, mode_number)
+
+    #     time_data = list(self.x_data)
+
+    #     if plot_data == "Mx/My/Mz vs Time":
+    #         labels = ["Mx", "My", "Mz"]
+    #         moment_x, moment_y, moment_z = self.compute_moments()
+
+    #         if mode_number == 1:
+    #             self.individual_lines[0].set_data(time_data, moment_x)
+    #             self.individual_lines[1].set_data(time_data, moment_y)
+    #             self.individual_lines[2].set_data(time_data, moment_z)
+
+    #             self.ax.relim()
+    #             self.ax.autoscale_view()
+    #             self.ax.set_xlabel("Time")
+    #             self.ax.set_ylabel("Moment (lbf-in)")
+    #             self.ax.legend(["Mx", "My", "Mz"])
+    #             self.ax.grid(True)
+    #             self.ax.xaxis.set_major_formatter(ticker.FuncFormatter(format_msec))
+    #         else:
+    #             self.axes[0].clear()
+    #             self.axes[0].plot(time_data, moment_x, label="Mx")
+    #             self.axes[0].set_ylabel("Mx")
+    #             self.axes[0].legend(fontsize=7)
+    #             self.axes[0].grid(True)
+
+    #             self.axes[1].clear()
+    #             self.axes[1].plot(time_data, moment_y, label="My")
+    #             self.axes[1].set_ylabel("My")
+    #             self.axes[1].legend(fontsize=7)
+    #             self.axes[1].grid(True)
+
+    #             self.axes[2].clear()
+    #             self.axes[2].plot(time_data, moment_z, label="Mz")
+    #             self.axes[2].set_ylabel("Mz")
+    #             self.axes[2].legend(fontsize=7)
+    #             self.axes[2].grid(True)
+
+    #             self.axes[-1].set_xlabel("Time")
+    #             self.axes[-1].xaxis.set_major_formatter(ticker.FuncFormatter(format_msec))
+
+    #     else:
+    #         for i, label in enumerate(labels):
+    #             indices = data_indices[label]
+    #             vals = [sum(self.y_data[k][j] for k in indices) for j in range(len(self.x_data))]
+    #             # vals = smooth(vals, smoothing_n)
+
+    #             if mode_number == 1:
+    #                 self.individual_lines[i].set_data(time_data, vals)
+    #             else:
+    #                 ax = self.axes[i]
+    #                 ax.clear()
+    #                 ax.plot(time_data, vals, label=label)
+    #                 ax.set_ylabel(label)
+    #                 ax.legend(fontsize=7)
+    #                 ax.grid(True)
+
+    #         if mode_number == 1:
+    #             self.ax.relim()
+    #             self.ax.autoscale_view()
+    #             self.ax.set_xlabel("Time")
+    #             self.ax.set_ylabel("Force")
+    #             self.ax.legend([line.get_label() for line in self.individual_lines[:len(labels)]])
+    #             self.ax.grid(True)
+    #             self.ax.xaxis.set_major_formatter(ticker.FuncFormatter(format_msec))
+    #         else:
+    #             self.axes[-1].set_xlabel("Time")
+    #             self.axes[-1].xaxis.set_major_formatter(ticker.FuncFormatter(format_msec))
+
+    #     self.canvas.figure.autofmt_xdate()
+    #     self.canvas.draw()
 
     def plot_historical(self):
         # Clear plot buffers

@@ -74,7 +74,7 @@ class TeensySocketThread(QThread):
 
         self.accel_offset = [0.0, 0.0, 0.0]
 
-        self.db_queue = Queue()
+        self.db_queue = Queue(maxsize=10000)  # Use a large queue to handle bursts
         self._db_writer_thread = threading.Thread(target=self._db_writer_loop, daemon=True)
         self._db_writer_thread.start()
 
