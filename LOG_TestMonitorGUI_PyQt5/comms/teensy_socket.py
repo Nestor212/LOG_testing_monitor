@@ -233,6 +233,7 @@ class TeensySocketThread(QThread):
 
             except socket.timeout:
                 # Minor network hiccup — just continue
+                self.emitter.log_message.emit("Minor Socket timeout, waiting for more data...")
                 continue
 
             except (ConnectionResetError, OSError) as e:
