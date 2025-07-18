@@ -294,8 +294,6 @@ class MainWindow(QMainWindow):
         container.setLayout(main_layout)
         self.setCentralWidget(container)
 
-        log_file = f"lc_sps_log_{datetime.date.today().isoformat()}.csv"
-
         if getattr(sys, 'frozen', False):
             # Running as PyInstaller bundle
             base_dir = os.path.dirname(sys.executable)
@@ -303,15 +301,25 @@ class MainWindow(QMainWindow):
             # Running as script
             base_dir = os.path.dirname(os.path.abspath(__file__))
 
+        log_file = f"lc_sps_log_{datetime.date.today().isoformat()}.csv"
         self.sps_log_path = os.path.join(base_dir, "..", "Database", log_file)
+        self.sys_log_path = os.path.join(base_dir, "..", "Database", "sys_log.txt")
 
         with open(self.sps_log_path, 'a', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(["Timestamp", "LC_SPS", "Accel_SPS"])
 
     def log_message(self, message):
+        # Update UI console output
         timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-        self.console_output.append(f"[{timestamp}] {message}")
+        log_entry = f"[{timestamp}] {message}"
+        self.console_output.append(log_entry)
+
+        # Write to log file
+        if not os.path.exists(self.sys_log_path):
+            return
+        with open(self.sys_log_path, "a") as f:
+            f.write(log_entry + "\n")
 
     def handle_disconnection(self):
         self.log_message("🔌 Disconnected signal received.")
