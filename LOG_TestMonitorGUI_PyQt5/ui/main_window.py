@@ -412,6 +412,7 @@ class MainWindow(QMainWindow):
             self.connect_btn.setText("Connect")
             self.update_led("red")
             self.update_accel_led("red")
+            self.update_lc_sps_led("red")
             self.update_trigger_widget_states()
             self.load_offsets_checkbox.setEnabled(True)
         else:
@@ -576,7 +577,7 @@ class MainWindow(QMainWindow):
             self.update_lc_sps_led("green")
         else:
             self.update_lc_sps_led("red")
-            
+
         self.lc_sps_label.setText(f"LC SPS: {lc_sps}")
         self.accel_sps_label.setText(f"Accel SPS: {accel_sps}")
 
