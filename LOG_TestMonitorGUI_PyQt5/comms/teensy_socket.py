@@ -7,7 +7,7 @@ import csv
 import sys
 from PyQt5.QtCore import QThread
 from comms.parser_emitter import ParserEmitter
-from Database.db import get_connection  # Ensure this is at the top of your file
+from Database.db import get_connection
 from queue import Queue
 from collections import deque
 import threading
@@ -149,15 +149,11 @@ class TeensySocketThread(QThread):
             time.sleep(self.emit_interval)
             timestamp_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
 
-            if self.avg_load_buffer:
-                avg_loads = np.mean(self.avg_load_buffer, axis=0).tolist()
-            else:
-                avg_loads = [0.0] * 6
+            while not self.avg_load_buffer:
+                time.sleep(0.1)  # Wait for data to accumulate
 
-            if self.avg_accel_buffer:
-                avg_accels = np.mean(self.avg_accel_buffer, axis=0).tolist()
-            else:
-                avg_accels = [0.0, 0.0, 0.0]
+            avg_loads = np.mean(self.avg_load_buffer, axis=0).tolist()
+            avg_accels = np.mean(self.avg_accel_buffer, axis=0).tolist()
 
             self.latest_data = (
                 timestamp_str,
@@ -458,17 +454,36 @@ class TeensySocketThread(QThread):
 
     def _update_sps_counter(self, raw_ts, has_accel):
         current_sec = int(raw_ts)
+        sys_stable = True
         if not hasattr(self, 'last_sps_sec'):
             self.last_sps_sec = current_sec
             self.lc_sps_counter = 0
             self.accel_sps_counter = 0
+            return
 
-        if current_sec == self.last_sps_sec:
+        gap = current_sec - self.last_sps_sec
+
+        if gap == 0:
             self.lc_sps_counter += 1
             if has_accel:
                 self.accel_sps_counter += 1
         else:
-            self.emitter.update_sps.emit(self.lc_sps_counter, self.accel_sps_counter)
+            # Handle missing samples for the previous second
+            missed_in_last_sec = 30 - self.lc_sps_counter
+            if missed_in_last_sec > 0:
+                self.emitter.log_message.emit(f"Data loss: {missed_in_last_sec} samples missing at {self.last_sps_sec}")
+                sys_stable = False
+
+            # Handle skipped entire seconds
+            if gap > 1:
+                skipped_samples = (gap - 1) * 64
+                self.emitter.log_message.emit(f"Skipped {gap - 1} seconds → {skipped_samples} samples missed between {self.last_sps_sec + 1} and {current_sec - 1}")
+                sys_stable = False
+
+            # Emit SPS for the previous second
+            self.emitter.update_sps.emit(self.lc_sps_counter, self.accel_sps_counter, sys_stable)
+
+            # Reset counters for the new second
             self.last_sps_sec = current_sec
             self.lc_sps_counter = 1
             self.accel_sps_counter = 1 if has_accel else 0

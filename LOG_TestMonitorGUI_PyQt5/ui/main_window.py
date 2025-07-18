@@ -82,12 +82,18 @@ class MainWindow(QMainWindow):
         self.lc_sps_label = QLabel("SPS: ---")
         self.lc_sps_label.setFont(QFont("Arial", 12))
 
+        self.lc_sps_led = QLabel()
+        self.lc_sps_led.setFixedSize(20, 20)
+        self.update_lc_sps_led("red")
+
         # Horizontal layout for the top row (forces + SPS)
         forces_row_layout = QHBoxLayout()
         forces_row_layout.addStretch()
         forces_row_layout.addWidget(self.forces_title)
         forces_row_layout.addSpacing(10)
         forces_row_layout.addWidget(self.lc_sps_label)
+        forces_row_layout.addSpacing(10)
+        forces_row_layout.addWidget(self.lc_sps_led)
         forces_row_layout.addStretch()
 
         # Orientation label (second row)
@@ -433,6 +439,12 @@ class MainWindow(QMainWindow):
 
             self.update_trigger_settings()
 
+    def update_lc_sps_led(self, color):
+        palette = self.lc_sps_led.palette()
+        palette.setColor(QPalette.Window, QColor(color))
+        self.lc_sps_led.setAutoFillBackground(True)
+        self.lc_sps_led.setPalette(palette)
+
     def update_accel_led(self, color):
         palette = self.accel_led.palette()
         palette.setColor(QPalette.Window, QColor(color))
@@ -559,7 +571,12 @@ class MainWindow(QMainWindow):
         self.net_force_labels['Moment_Y'].setText(f"Moment Y: {moment_y:.2f} lbf-in")
         self.net_force_labels['Moment_Z'].setText(f"Moment Z: {moment_z:.2f} lbf-in")
 
-    def update_sps_display(self, lc_sps, accel_sps):
+    def update_sps_display(self, lc_sps, accel_sps, sys_stable):
+        if sys_stable:
+            self.update_lc_sps_led("green")
+        else:
+            self.update_lc_sps_led("red")
+            
         self.lc_sps_label.setText(f"LC SPS: {lc_sps}")
         self.accel_sps_label.setText(f"Accel SPS: {accel_sps}")
 
