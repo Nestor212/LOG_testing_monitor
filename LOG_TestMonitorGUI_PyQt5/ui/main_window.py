@@ -311,7 +311,7 @@ class MainWindow(QMainWindow):
 
     def log_message(self, message):
         # Update UI console output
-        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         log_entry = f"[{timestamp}] {message}"
         self.console_output.append(log_entry)
 
