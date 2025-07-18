@@ -388,6 +388,7 @@ class PlotWindow(QWidget):
             for line in self.individual_lines:
                 line.remove()
             self.individual_lines.clear()
+            self.ax.set_prop_cycle(None) # Reset color cycle
 
             self.individual_lines = [
                 self.ax.plot([], [], label=label)[0] for label in labels
