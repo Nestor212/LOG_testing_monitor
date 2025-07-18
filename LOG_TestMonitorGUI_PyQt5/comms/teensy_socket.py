@@ -33,6 +33,8 @@ class TeensySocketThread(QThread):
         self.avg_accel_stale = False
         self.last_read_time = time.time()
 
+        self.log_to_csv = False
+
         self.trigger_enabled = False
         self.trigger_active = False
         self.trigger_mode = "Threshold"
@@ -490,65 +492,65 @@ class TeensySocketThread(QThread):
 
     def _db_writer_loop(self):
         # Open CSV files once for appending
-        lc_log_path = os.path.join(self.data_dir, "load_buffer_log.csv")
-        accel_log_path = os.path.join(self.data_dir, "accel_buffer_log.csv")
+        # lc_log_path = os.path.join(self.data_dir, "load_buffer_log.csv")
+        # accel_log_path = os.path.join(self.data_dir, "accel_buffer_log.csv")
 
-        with open(lc_log_path, "a", newline="") as load_csv_file, \
-            open(accel_log_path, "a", newline="") as accel_csv_file:
-            load_writer = csv.writer(load_csv_file)
-            accel_writer = csv.writer(accel_csv_file)
+        # with open(lc_log_path, "a", newline="") as load_csv_file, \
+        #     open(accel_log_path, "a", newline="") as accel_csv_file:
+        #     load_writer = csv.writer(load_csv_file)
+        #     accel_writer = csv.writer(accel_csv_file)
 
-            while True:
-                payload = self.db_queue.get()
-                if payload is None:
-                    break  # For clean shutdown
+        while True:
+            payload = self.db_queue.get()
+            if payload is None:
+                break  # For clean shutdown
 
-                try:
-                    conn = get_connection()
-                    cursor = conn.cursor()
+            try:
+                conn = get_connection()
+                cursor = conn.cursor()
 
-                    now_str = payload["timestamp"]
+                now_str = payload["timestamp"]
 
-                    if payload["zero_pending"]["loads"]:
-                        cursor.execute("""
-                            INSERT INTO load_cell_zero_offsets (
-                                timestamp, lc1_offset, lc2_offset, lc3_offset, lc4_offset, lc5_offset, lc6_offset
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                        """, [now_str] + payload["load_offsets"])
+                if payload["zero_pending"]["loads"]:
+                    cursor.execute("""
+                        INSERT INTO load_cell_zero_offsets (
+                            timestamp, lc1_offset, lc2_offset, lc3_offset, lc4_offset, lc5_offset, lc6_offset
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, [now_str] + payload["load_offsets"])
 
-                    if payload["zero_pending"]["accels"]:
-                        cursor.execute("""
-                            INSERT INTO accelerometer_zero_offsets (
-                                timestamp, ax_offset, ay_offset, az_offset
-                            ) VALUES (?, ?, ?, ?)
-                        """, [now_str] + payload["accel_offset"])
+                if payload["zero_pending"]["accels"]:
+                    cursor.execute("""
+                        INSERT INTO accelerometer_zero_offsets (
+                            timestamp, ax_offset, ay_offset, az_offset
+                        ) VALUES (?, ?, ?, ?)
+                    """, [now_str] + payload["accel_offset"])
 
-                    if payload["db_load_buffer"]:
-                        cursor.executemany("""
-                            INSERT INTO load_cells (timestamp, lc1, lc2, lc3, lc4, lc5, lc6)
-                            VALUES (?, ?, ?, ?, ?, ?, ?)
-                        """, payload["db_load_buffer"])
+                if payload["db_load_buffer"]:
+                    cursor.executemany("""
+                        INSERT INTO load_cells (timestamp, lc1, lc2, lc3, lc4, lc5, lc6)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, payload["db_load_buffer"])
 
-                        # Write to CSV
-                        for row in payload["db_load_buffer"]:
-                            load_writer.writerow(row)
+                    # Write to CSV
+                    # for row in payload["db_load_buffer"]:
+                    #     load_writer.writerow(row)
 
-                    if payload["accel_buffer"]:
-                        cursor.executemany("""
-                            INSERT INTO accelerometer (timestamp, ax, ay, az)
-                            VALUES (?, ?, ?, ?)
-                        """, payload["accel_buffer"])
+                if payload["accel_buffer"]:
+                    cursor.executemany("""
+                        INSERT INTO accelerometer (timestamp, ax, ay, az)
+                        VALUES (?, ?, ?, ?)
+                    """, payload["accel_buffer"])
 
-                        # Write to CSV
-                        for row in payload["accel_buffer"]:
-                            accel_writer.writerow(row)
+                    # Write to CSV
+                    # for row in payload["accel_buffer"]:
+                    #     accel_writer.writerow(row)
 
-                    conn.commit()
-                    conn.close()
-                except Exception as e:
-                    self.emitter.log_message.emit(f"⚠️ DB writer error: {e}")
-                finally:
-                    self.db_queue.task_done()
+                conn.commit()
+                conn.close()
+            except Exception as e:
+                self.emitter.log_message.emit(f"⚠️ DB writer error: {e}")
+            finally:
+                self.db_queue.task_done()
 
     def flush_logs(self):
         # If trigger is enabled but not yet fired, skip flushing
