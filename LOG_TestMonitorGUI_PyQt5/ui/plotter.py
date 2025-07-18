@@ -389,9 +389,9 @@ class PlotWindow(QWidget):
                 line.remove()
             self.individual_lines.clear()
 
-            for label in labels:
-                line, = self.ax.plot([], [], label=label)
-                self.individual_lines.append(line)
+            self.individual_lines = [
+                self.ax.plot([], [], label=label)[0] for label in labels
+            ]
 
         for i, data in enumerate(data_series):
             self.individual_lines[i].set_data(time_data, data)
