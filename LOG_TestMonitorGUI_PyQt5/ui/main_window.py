@@ -301,13 +301,13 @@ class MainWindow(QMainWindow):
             # Running as script
             base_dir = os.path.dirname(os.path.abspath(__file__))
 
-        log_file = f"lc_sps_log_{datetime.date.today().isoformat()}.csv"
-        self.sps_log_path = os.path.join(base_dir, "..", "Database", log_file)
+        # log_file = f"lc_sps_log_{datetime.date.today().isoformat()}.csv"
+        # self.sps_log_path = os.path.join(base_dir, "..", "Database", log_file)
+        # with open(self.sps_log_path, 'a', newline='') as f:
+        #     writer = csv.writer(f)
+        #     writer.writerow(["Timestamp", "LC_SPS", "Accel_SPS"])
+        
         self.sys_log_path = os.path.join(base_dir, "..", "Database", "sys_log.txt")
-
-        with open(self.sps_log_path, 'a', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(["Timestamp", "LC_SPS", "Accel_SPS"])
 
     def log_message(self, message):
         # Update UI console output
@@ -589,10 +589,10 @@ class MainWindow(QMainWindow):
         self.lc_sps_label.setText(f"LC SPS: {lc_sps}")
         self.accel_sps_label.setText(f"Accel SPS: {accel_sps}")
 
-        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        with open(self.sps_log_path, 'a', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow([now, lc_sps, accel_sps])
+        # now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # with open(self.sps_log_path, 'a', newline='') as f:
+        #     writer = csv.writer(f)
+        #     writer.writerow([now, lc_sps, accel_sps])
 
     def closeEvent(self, event):
         if self.socket_thread and self.socket_thread.isRunning():
