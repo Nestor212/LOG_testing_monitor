@@ -383,6 +383,15 @@ class PlotWindow(QWidget):
         return data_series, labels
 
     def update_lines(self, time_data, data_series, labels):
+        if len(self.individual_lines) != len(labels):
+            print("⚠️ Mismatch detected. Rebuilding individual lines to match new data.")
+            self.individual_lines.clear()
+
+            # Rebuild the lines in-place without affecting the rest of the plot
+            for label in labels:
+                line, = self.ax.plot([], [], label=label)
+                self.individual_lines.append(line)
+
         for i, data in enumerate(data_series):
             self.individual_lines[i].set_data(time_data, data)
             self.individual_lines[i].set_label(labels[i])
