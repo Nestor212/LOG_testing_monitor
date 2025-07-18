@@ -256,11 +256,13 @@ class PlotWindow(QWidget):
 
     def rebuild_plot_layout(self, plot_data, mode_number):
         self.canvas.figure.clf()
+        y_label = "Force (lbf)"
 
         if plot_data == "Fx/Fy/Fz vs Time":
             labels = ["Fx", "Fy", "Fz"]
         elif plot_data == "Mx/My/Mz vs Time":
             labels = ["Mx", "My", "Mz"]
+            y_label = "Moment (lbf-in)"
         elif plot_data == "All Load Cells (F1–F6) vs Time":
             labels = [f"F{i+1}" for i in range(6)]
         elif plot_data == "Axial Loads (Z: F1, F3, F5) vs Time":
@@ -279,7 +281,7 @@ class PlotWindow(QWidget):
                 self.ax.plot([], [], label=label)[0] for label in labels
             ]
             self.ax.set_xlabel("Time")
-            self.ax.set_ylabel("Force/Moment")
+            self.ax.set_ylabel(y_label)
             self.ax.legend(fontsize=7)
             self.ax.grid(True)
         else:
@@ -383,6 +385,7 @@ class PlotWindow(QWidget):
     def update_lines(self, time_data, data_series, labels):
         for i, data in enumerate(data_series):
             self.individual_lines[i].set_data(time_data, data)
+            self.individual_lines[i].set_label(labels[i])
 
     def update_subplots(self, time_data, data_series, labels):
         for i, data in enumerate(data_series):
@@ -393,12 +396,13 @@ class PlotWindow(QWidget):
             ax.legend(fontsize=7)
             ax.grid(True)
 
-    def handle_axes_formatting(self, labels, mode):
+    def handle_axes_formatting(self, labels, mode, y_label):
         if mode == "Single Plot":
             self.ax.relim()
             self.ax.autoscale_view()
             self.ax.legend([line.get_label() for line in self.individual_lines[:len(labels)]])
             self.ax.set_xlabel("Time")
+            self.ax.set_ylabel(y_label)
             self.ax.grid(True)
             self.ax.xaxis.set_major_formatter(ticker.FuncFormatter(format_msec))
         else:
@@ -411,6 +415,7 @@ class PlotWindow(QWidget):
         if not self.x_data:
             return
 
+        y_label = "Force (lbf)"
         time_data = list(self.x_data)
 
         self.check_lag_and_throttle()
@@ -422,6 +427,7 @@ class PlotWindow(QWidget):
             moment_x, moment_y, moment_z = self.compute_moments()
             data_series = [moment_x, moment_y, moment_z]
             labels = ["Mx", "My", "Mz"]
+            y_label = "Moment (lbf-in)"
         else:
             data_series, labels = self.prepare_force_data()
 
@@ -430,10 +436,8 @@ class PlotWindow(QWidget):
         else:
             self.update_subplots(time_data, data_series, labels)
 
-        self.handle_axes_formatting(labels, plot_mode)
+        self.handle_axes_formatting(labels, plot_mode, y_label)
         self.canvas.draw()
-
-
 
     # def refresh_plot(self):
     #     plot_data = self.plot_data_selector.currentText()
