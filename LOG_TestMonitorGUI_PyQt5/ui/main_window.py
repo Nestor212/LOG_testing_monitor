@@ -315,9 +315,6 @@ class MainWindow(QMainWindow):
         log_entry = f"[{timestamp}] {message}"
         self.console_output.append(log_entry)
 
-        # Write to log file
-        if not os.path.exists(self.sys_log_path):
-            return
         with open(self.sys_log_path, "a") as f:
             f.write(log_entry + "\n")
 
