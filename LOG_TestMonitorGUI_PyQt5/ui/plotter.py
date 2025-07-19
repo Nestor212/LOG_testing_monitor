@@ -132,6 +132,7 @@ class PlotWindow(QWidget):
 
         self.start_live_from_past_checkbox = QCheckBox("Start from history")
         self.start_live_from_past_checkbox.setChecked(False)
+        self.start_live_from_past_checkbox.setEnabled(False)
         self.start_live_from_past_checkbox.toggled.connect(self.toggle_live_history)
 
         self.window_selector = QComboBox()
@@ -581,7 +582,7 @@ class PlotWindow(QWidget):
         self.window_selector.setEnabled(checked)
         self.start_btn.setEnabled(checked)
         self.live_checkbox.setChecked(checked)
-        self.start_live_from_past_checkbox.setEnabled(checked)
+        self.start_live_from_past_checkbox.setEnabled(False) #Disabled until debugged
 
         # Controls related to historical plotting
         self.plot_button.setEnabled(not checked)
@@ -631,7 +632,7 @@ class PlotWindow(QWidget):
             self.depth_input.setEnabled(True)
             self.feed_rate_input.setEnabled(True)
             self.pitch_input.setEnabled(True)
-            self.start_live_from_past_checkbox.setEnabled(True)
+            self.start_live_from_past_checkbox.setEnabled(False) #Disabled until debugged
             return
         
         # Clear plot buffers
