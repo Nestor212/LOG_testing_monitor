@@ -3,7 +3,6 @@ import time
 import datetime
 import threading
 import os
-import csv
 import sys
 from PyQt5.QtCore import QThread
 from comms.parser_emitter import ParserEmitter
@@ -12,6 +11,7 @@ from queue import Queue
 from collections import deque
 import threading
 import numpy as np
+import math
 
 class TeensySocketThread(QThread):
     first_connection_done = False
@@ -354,6 +354,9 @@ class TeensySocketThread(QThread):
             self.avg_load_buffer.append(adjusted_loads)
             if adjusted_accels is not None:
                 self.avg_accel_buffer.append(adjusted_accels)
+            else:
+                #Send Zeroed accelerometer values if no valid data
+                self.avg_accel_buffer.append([0.0, 0.0, 0.0])
 
             self._update_trigger_logic(adjusted_loads)
             self._update_sps_counter(timestamp.timestamp(), bool(adjusted_accels))
@@ -365,7 +368,7 @@ class TeensySocketThread(QThread):
     def _parse_fields(self, line):
         fields = line[3:].strip().split()
         if len(fields) != 12:
-            # self.emitter.log_message.emit(f"⚠️ Malformed line: {line}")
+            self.emitter.log_message.emit(f"⚠️ Malformed line: {line}")
             return None
 
         raw_ts = float(fields[0])
@@ -426,7 +429,9 @@ class TeensySocketThread(QThread):
 
     def _process_loads(self, loads, timestamp):
         adjusted = [l - offset - zero for l, offset, zero in zip(loads, self.load_offsets, self.lc_zero_load_offset)]
-        rounded = [round(x, 4) for x in adjusted]
+
+        # Replace NaN with 0.0 and round
+        rounded = [round(0.0 if math.isnan(x) else x, 4) for x in adjusted]
 
         self.pre_trigger_buffer.append((timestamp, *rounded))
 

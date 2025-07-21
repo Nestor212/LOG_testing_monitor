@@ -154,8 +154,8 @@ class MainWindow(QMainWindow):
         self.timer.start(1000)
 
         # Connection Controls
-        #self.ip_input = QLineEdit("192.168.1.232")
-        self.ip_input = QLineEdit("10.130.91.42")
+        self.ip_input = QLineEdit("192.168.1.232")
+        # self.ip_input = QLineEdit("10.130.91.42")
         self.connect_btn = QPushButton("Connect")
         self.connect_btn.clicked.connect(self.toggle_connection)
         self.status_led = QLabel()
