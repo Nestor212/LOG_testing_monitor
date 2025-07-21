@@ -12,6 +12,7 @@ from collections import deque
 import threading
 import numpy as np
 import math
+import csv
 
 class TeensySocketThread(QThread):
     first_connection_done = False
@@ -84,8 +85,12 @@ class TeensySocketThread(QThread):
     def load_last_offsets(self):
         """Load the last stored offsets from the database."""
         self.load_offsets = self.fetch_latest_load_offsets_from_db()
-        rounded_offsets = [round(val, 2) for val in self.load_offsets]
-        self.emitter.log_message.emit(f"🔌 Loaded offsets from DB: {rounded_offsets}")
+
+        self.load_offsets = [
+            round(0.0 if val is None or (isinstance(val, float) and math.isnan(val)) else val, 2)
+            for val in self.load_offsets
+        ]
+        self.emitter.log_message.emit(f"🔌 Loaded offsets from DB: {self.load_offsets}")
         self.zero_pending["loads"] = False
         TeensySocketThread.zeroed = True  # Mark as zeroed to avoid re-zeroing on next connection
 
@@ -121,7 +126,7 @@ class TeensySocketThread(QThread):
                 ]
                 self.zero_pending["loads"] = True
                 self.emitter.log_message.emit(
-                    f"🔧 Zeroed load cells: {[round(val, 2) for val in self.load_offsets]}"
+                    f"🔧 Zeroed load cells: {[round(0.0 if math.isnan(val) else val, 2) for val in self.load_offsets]}"
                 )
         else:
             # Clear load offsets without zeroing
@@ -138,7 +143,7 @@ class TeensySocketThread(QThread):
                     self.accel_offset = accels[:]
                     self.zero_pending["accels"] = True
                     self.emitter.log_message.emit(
-                    f"🔧 Zeroed accelerometer: {[round(val, 2) for val in self.accel_offset]}"
+                    f"🔧 Zeroed accelerometer: {[round(0.0 if math.isnan(val) else val, 2) for val in self.accel_offset]}"
                     )
         else:
             # Clear accelerometer offsets without zeroing
@@ -164,7 +169,6 @@ class TeensySocketThread(QThread):
                 self.avg_accel_on,
                 self.avg_accel_stale
             )
-
             self.emitter.new_data.emit(
                 timestamp_str,
                 avg_loads,
@@ -215,7 +219,7 @@ class TeensySocketThread(QThread):
 
         while self.running:
             try:
-                chunk = self.s.recv(2048).decode(errors='ignore')
+                chunk = self.s.recv(4096).decode(errors='ignore')
 
                 if not chunk:
                     raise ConnectionResetError("Socket closed by peer.")
@@ -264,81 +268,6 @@ class TeensySocketThread(QThread):
         self.avg_accel_buffer.clear()
         self.db_load_buffer.clear()
         self.pre_trigger_buffer.clear()
-
-    # def run(self):
-    #     self.emitter.log_message.emit("🔌 Starting socket thread.")
-    #     buffer = ""
-    #     self.inactivity_timeout = 2.0  # Seconds without data → auto disconnect
-
-    #     if not hasattr(self, 'emit_thread_started'):
-    #         threading.Thread(target=self.emit_loop, daemon=True).start()
-    #         self.emit_thread_started = True
-
-    #     while self.running:
-    #         try:
-    #             self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    #             self.s.settimeout(3)  # Timeout for connect
-    #             self.s.connect((self.host, self.port))
-    #             self.s.settimeout(1)  # Shorter timeout for recv
-
-    #             self.s.sendall(b"HELLO\n")
-    #             time.sleep(0.1)
-    #             self.sync_time()
-
-    #             while self.running:
-    #                 if time.time() - self.last_read_time > self.inactivity_timeout:
-    #                     self.emitter.log_message.emit("⚠️ Inactivity timeout — auto-disconnecting.")
-    #                     self.emitter.disconnected.emit()
-    #                     self.stop()
-    #                     return
-
-    #                 try:
-    #                     chunk = self.s.recv(2048).decode(errors='ignore')
-    #                 except (socket.timeout, ConnectionResetError, OSError) as e:
-    #                     if self.running:
-    #                         self.emitter.log_message.emit(f"⚠️ Socket receive error: {e}")
-    #                         break
-    #                     else:
-    #                         break
-
-    #                 if not chunk:
-    #                     self.emitter.log_message.emit("⚠️ Socket closed by teensy.")
-    #                     break
-
-    #                 self.last_read_time = time.time()
-    #                 buffer += chunk
-
-    #                 while '\n' in buffer:
-    #                     line, buffer = buffer.split('\n', 1)
-    #                     line = line.strip()
-    #                     if not line:
-    #                         continue  # Skip empty lines
-    #                     elif line.startswith("TS ") and line.count(' ') >= 12:
-    #                         self.handle_line(line)
-    #                     elif line.startswith("LC") or line.startswith("Time"):
-    #                         self.emitter.log_message.emit(f"Teensy says: {line}")
-    #                     elif line.startswith("\n"):
-    #                         continue
-    #                     else:
-    #                         self.emitter.log_message.emit(f"⚠️ Unparsed line: {line}")
-
-    #                 self.flush_logs()
-
-    #         except (socket.timeout, ConnectionRefusedError, OSError) as e:
-    #             self.emitter.log_message.emit(f"⚠️ Connection error: {e}")
-    #             time.sleep(5)
-    #         finally:
-    #             if self.s:
-    #                 try:
-    #                     self.s.sendall(b"D\n")
-    #                 except Exception:
-    #                     pass
-    #                 try:
-    #                     self.s.close()
-    #                 except Exception:
-    #                     pass
-    #                 self.s = None
-    #                 self.emitter.disconnected.emit()
 
     def handle_line(self, line):
         try:
@@ -428,11 +357,10 @@ class TeensySocketThread(QThread):
                 self.trigger_active = False
 
     def _process_loads(self, loads, timestamp):
+        loads = [round(0.0 if math.isnan(x) else x, 4) for x in loads]
         adjusted = [l - offset - zero for l, offset, zero in zip(loads, self.load_offsets, self.lc_zero_load_offset)]
-
         # Replace NaN with 0.0 and round
         rounded = [round(0.0 if math.isnan(x) else x, 4) for x in adjusted]
-
         self.pre_trigger_buffer.append((timestamp, *rounded))
 
         # Store if trigger is active or finishing
@@ -496,27 +424,57 @@ class TeensySocketThread(QThread):
             self.accel_sps_counter = 1 if has_accel else 0
 
     def _db_writer_loop(self):
-        # Open CSV files once for appending
-        # lc_log_path = os.path.join(self.data_dir, "load_buffer_log.csv")
-        # accel_log_path = os.path.join(self.data_dir, "accel_buffer_log.csv")
+        lc_log_path = os.path.join(self.data_dir, "load_buffer_log.csv")
+        accel_log_path = os.path.join(self.data_dir, "accel_buffer_log.csv")
 
-        # with open(lc_log_path, "a", newline="") as load_csv_file, \
-        #     open(accel_log_path, "a", newline="") as accel_csv_file:
-        #     load_writer = csv.writer(load_csv_file)
-        #     accel_writer = csv.writer(accel_csv_file)
+        with open(lc_log_path, "a", newline="") as load_csv_file, \
+            open(accel_log_path, "a", newline="") as accel_csv_file:
 
-        while True:
-            payload = self.db_queue.get()
-            if payload is None:
-                break  # For clean shutdown
+            load_writer = csv.writer(load_csv_file)
+            accel_writer = csv.writer(accel_csv_file)
 
-            try:
-                conn = get_connection()
-                cursor = conn.cursor()
+            batch = []
+            BATCH_SIZE = 50
+            BATCH_TIMEOUT = 0.2  # seconds
 
+            last_batch_time = time.time()
+
+            while True:
+                try:
+                    payload = self.db_queue.get(timeout=BATCH_TIMEOUT)
+
+                    if payload is None:
+                        break  # Clean shutdown
+
+                    batch.append(payload)
+
+                    if len(batch) >= BATCH_SIZE:
+                        # print(f"[DB Writer] Writing batch of {len(batch)} payloads to DB (Batch size hit).")
+                        self._process_batch(batch, load_writer, accel_writer)
+                        batch.clear()
+                        last_batch_time = time.time()
+
+                except Exception:
+                    # Queue timeout → check if we have a partial batch to flush
+                    if batch and (time.time() - last_batch_time) > BATCH_TIMEOUT:
+                        # print(f"[DB Writer] Timeout flush: Writing batch of {len(batch)} payloads to DB.")
+                        self._process_batch(batch, load_writer, accel_writer)
+                        batch.clear()
+                        last_batch_time = time.time()
+
+    def _process_batch(self, batch, load_writer, accel_writer):
+        try:
+            conn = get_connection()
+            cursor = conn.cursor()
+
+            total_load_rows = 0
+            total_accel_rows = 0
+
+            for payload in batch:
                 now_str = payload["timestamp"]
 
                 if payload["zero_pending"]["loads"]:
+                    print(f"[Batch] Writing load zero offsets at {now_str}")
                     cursor.execute("""
                         INSERT INTO load_cell_zero_offsets (
                             timestamp, lc1_offset, lc2_offset, lc3_offset, lc4_offset, lc5_offset, lc6_offset
@@ -524,6 +482,7 @@ class TeensySocketThread(QThread):
                     """, [now_str] + payload["load_offsets"])
 
                 if payload["zero_pending"]["accels"]:
+                    print(f"[Batch] Writing accel zero offsets at {now_str}")
                     cursor.execute("""
                         INSERT INTO accelerometer_zero_offsets (
                             timestamp, ax_offset, ay_offset, az_offset
@@ -536,9 +495,8 @@ class TeensySocketThread(QThread):
                         VALUES (?, ?, ?, ?, ?, ?, ?)
                     """, payload["db_load_buffer"])
 
-                    # Write to CSV
-                    # for row in payload["db_load_buffer"]:
-                    #     load_writer.writerow(row)
+                    load_writer.writerows(payload["db_load_buffer"])
+                    total_load_rows += len(payload["db_load_buffer"])
 
                 if payload["accel_buffer"]:
                     cursor.executemany("""
@@ -546,16 +504,80 @@ class TeensySocketThread(QThread):
                         VALUES (?, ?, ?, ?)
                     """, payload["accel_buffer"])
 
-                    # Write to CSV
-                    # for row in payload["accel_buffer"]:
-                    #     accel_writer.writerow(row)
+                    accel_writer.writerows(payload["accel_buffer"])
+                    total_accel_rows += len(payload["accel_buffer"])
 
-                conn.commit()
-                conn.close()
-            except Exception as e:
-                self.emitter.log_message.emit(f"⚠️ DB writer error: {e}")
-            finally:
-                self.db_queue.task_done()
+            conn.commit()
+            conn.close()
+
+            # print(f"[Batch] Committed {len(batch)} payloads → "
+            #     f"{total_load_rows} load rows and {total_accel_rows} accel rows.")
+        except Exception as e:
+            print(f"[Batch] ⚠️ DB error during batch insert: {e}")
+
+
+    # def _db_writer_loop(self):
+    #     # Open CSV files once for appending
+    #     lc_log_path = os.path.join(self.data_dir, "load_buffer_log.csv")
+    #     accel_log_path = os.path.join(self.data_dir, "accel_buffer_log.csv")
+
+    #     with open(lc_log_path, "a", newline="") as load_csv_file, \
+    #         open(accel_log_path, "a", newline="") as accel_csv_file:
+    #         load_writer = csv.writer(load_csv_file)
+    #         accel_writer = csv.writer(accel_csv_file)
+
+    #         while True:
+    #             print(f"[DB Writer] Current db_queue size: {self.db_queue.qsize()}")
+    #             payload = self.db_queue.get()
+    #             if payload is None:
+    #                 return  # break # For clean shutdown
+
+    #             try:
+    #                 conn = get_connection()
+    #                 cursor = conn.cursor()
+
+    #                 now_str = payload["timestamp"]
+
+    #                 if payload["zero_pending"]["loads"]:
+    #                     cursor.execute("""
+    #                         INSERT INTO load_cell_zero_offsets (
+    #                             timestamp, lc1_offset, lc2_offset, lc3_offset, lc4_offset, lc5_offset, lc6_offset
+    #                         ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    #                     """, [now_str] + payload["load_offsets"])
+
+    #                 if payload["zero_pending"]["accels"]:
+    #                     cursor.execute("""
+    #                         INSERT INTO accelerometer_zero_offsets (
+    #                             timestamp, ax_offset, ay_offset, az_offset
+    #                         ) VALUES (?, ?, ?, ?)
+    #                     """, [now_str] + payload["accel_offset"])
+
+    #                 if payload["db_load_buffer"]:
+    #                     cursor.executemany("""
+    #                         INSERT INTO load_cells (timestamp, lc1, lc2, lc3, lc4, lc5, lc6)
+    #                         VALUES (?, ?, ?, ?, ?, ?, ?)
+    #                     """, payload["db_load_buffer"])
+
+    #                     # Write to CSV
+    #                     for row in payload["db_load_buffer"]:
+    #                         load_writer.writerow(row)
+
+    #                 if payload["accel_buffer"]:
+    #                     cursor.executemany("""
+    #                         INSERT INTO accelerometer (timestamp, ax, ay, az)
+    #                         VALUES (?, ?, ?, ?)
+    #                     """, payload["accel_buffer"])
+
+    #                     # Write to CSV
+    #                     for row in payload["accel_buffer"]:
+    #                         accel_writer.writerow(row)
+
+    #                 conn.commit()
+    #                 conn.close()
+    #             except Exception as e:
+    #                 self.emitter.log_message.emit(f"⚠️ DB writer error: {e}")
+    #             finally:
+    #                 self.db_queue.task_done()
 
     def flush_logs(self):
         # If trigger is enabled but not yet fired, skip flushing

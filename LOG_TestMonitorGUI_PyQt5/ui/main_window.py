@@ -25,7 +25,7 @@ def format_force(value, axis):
         arrow = "↓" if value >= 0 else "↑"
     elif axis == "Z":
         arrow = "▼" if value >= 0 else "▲"
-    return f"{value:+.2f} {arrow}"
+    return f"{value:+.3f} {arrow}"
 
 class MainWindow(QMainWindow):
     def __init__(self):

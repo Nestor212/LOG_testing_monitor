@@ -299,7 +299,7 @@ class PlotWindow(QWidget):
         now = datetime.datetime.now()
         lag_sec = (now - latest_time).total_seconds()
 
-        if lag_sec > 2:
+        if lag_sec > 1:
             if not self.catch_up_mode:
                 print(f"⚠️ Lag: {lag_sec:.2f}s behind. Slowing refresh.")
                 self.catch_up_mode = True
