@@ -221,7 +221,7 @@ class TeensySocketThread(QThread):
 
         while self.running:
             try:
-                chunk = self.s.recv(4096).decode(errors='ignore')
+                chunk = self.s.recv(2048).decode(errors='ignore')
 
                 if not chunk:
                     raise ConnectionResetError("Socket closed by peer.")
@@ -438,7 +438,7 @@ class TeensySocketThread(QThread):
             accel_writer = csv.writer(accel_csv_file)
 
             batch = []
-            BATCH_SIZE = 50
+            BATCH_SIZE = 100
             BATCH_TIMEOUT = 0.2  # seconds
 
             last_batch_time = time.time()
