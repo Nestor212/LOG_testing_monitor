@@ -33,6 +33,7 @@ class TeensySocketThread(QThread):
         self.avg_accel_on = False
         self.avg_accel_stale = False
         self.last_read_time = time.time()
+        self.timeout_counter = 0
 
         self.log_to_csv = False
 
@@ -216,6 +217,7 @@ class TeensySocketThread(QThread):
     def _recv_loop(self):
         buffer = ""
         self.last_read_time = time.time()
+        self.emitter.disconnected.emit(True)
 
         while self.running:
             try:
@@ -236,6 +238,7 @@ class TeensySocketThread(QThread):
             except socket.timeout:
                 # Minor network hiccup — just continue
                 self.emitter.log_message.emit("Minor Socket timeout, waiting for more data...")
+                self.timeout_counter += 1
                 continue
 
             except (ConnectionResetError, OSError) as e:
@@ -243,7 +246,8 @@ class TeensySocketThread(QThread):
                 break  # Exit to reconnect
 
             # Watchdog check happens **outside exceptions** for normal flow too
-            if time.time() - self.last_read_time > 2:
+            if (time.time() - self.last_read_time > 2) | self.timeout_counter >= 5:
+                self.timeout_counter = 0
                 self.emitter.log_message.emit("Watchdog timeout: No data received in 2s. Forcing reconnect.")
                 break
 
@@ -261,7 +265,7 @@ class TeensySocketThread(QThread):
         self.s = None
 
         self.emitter.log_message.emit("🔌 Socket closed. Cleaning up.")
-        self.emitter.disconnected.emit()
+        self.emitter.disconnected.emit(False)
 
         # Clear buffers
         self.avg_load_buffer.clear()

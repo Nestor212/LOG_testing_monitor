@@ -318,14 +318,19 @@ class MainWindow(QMainWindow):
         with open(self.sys_log_path, "a") as f:
             f.write(log_entry + "\n")
 
-    def handle_disconnection(self):
-        self.log_message("🔌 Disconnected signal received.")
-        if self.socket_thread:
-            self.socket_thread = None
-        self.connect_btn.setText("Connect")
-        self.update_led("red")
-        self.update_accel_led("red")
-        self.update_trigger_widget_states()
+    def handle_disconnection(self, connected):
+        if not connected:
+            self.log_message("🔌 Disconnected signal received.")
+            self.connect_btn.setText("Connect")
+            self.update_led("red")
+            self.update_accel_led("red")
+            self.update_trigger_widget_states()
+        else:
+            self.log_message("🔗 Connected signal received.")
+            self.connect_btn.setText("Disconnect")
+            self.update_led("green")
+            self.update_accel_led("green")
+            self.update_trigger_widget_states()
 
     def update_trigger_widget_states(self):
         trigger_enabled = self.trigger_checkbox.isChecked()
