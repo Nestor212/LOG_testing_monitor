@@ -20,3 +20,6 @@ Database/ExportedData/
 # (Redundancy if you want to be explicit)
 # Ignore data_log.db anywhere
 **/data_log.db
+LOG_TestMonitorGUI_PyQt5/Database/Data/data_log.db-wal
+LOG_TestMonitorGUI_PyQt5/Database/Data/data_log.db-shm
+LOG_TestMonitorGUI_PyQt5/Database/sys_log.txt
