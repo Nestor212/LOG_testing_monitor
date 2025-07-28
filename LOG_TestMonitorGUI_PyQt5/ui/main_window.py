@@ -187,7 +187,7 @@ class MainWindow(QMainWindow):
         conn_layout.addWidget(self.connect_btn)
         conn_layout.addWidget(QLabel("Status:"))
         conn_layout.addWidget(self.status_led)
-        conn_layout.addWidget(self.load_offsets_checkbox)
+        # conn_layout.addWidget(self.load_offsets_checkbox)
         conn_layout.addWidget(self.trigger_checkbox)
         conn_layout.addWidget(self.trigger_selector)
         conn_layout.addWidget(self.trigger_label)
@@ -465,8 +465,8 @@ class MainWindow(QMainWindow):
             self.update_led("green")
             self.load_offsets_checkbox.setEnabled(False)
 
-            if self.load_offsets_checkbox.isChecked():
-                self.socket_thread.load_last_offsets()
+            # if self.load_offsets_checkbox.isChecked():
+            self.socket_thread.load_last_offsets()
 
             self.update_trigger_settings()
 
