@@ -287,9 +287,9 @@ class TeensySocketThread(QThread):
             self.avg_load_buffer.append(adjusted_loads)
             if adjusted_accels is not None:
                 self.avg_accel_buffer.append(adjusted_accels)
-            else:
-                #Send Zeroed accelerometer values if no valid data
-                self.avg_accel_buffer.append([0.0, 0.0, 0.0])
+            # else:
+            #     #Send Zeroed accelerometer values if no valid data
+            #     self.avg_accel_buffer.append([0.0, 0.0, 0.0])
 
             self._update_trigger_logic(adjusted_loads)
             self._update_sps_counter(timestamp.timestamp(), bool(adjusted_accels))
