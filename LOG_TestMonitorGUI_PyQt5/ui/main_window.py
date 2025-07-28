@@ -12,11 +12,10 @@ from PyQt5.QtCore import QTimer, QTime
 from ui.plotter import PlotWindow
 # from ui.moment_map import MomentMapWidget
 from Database.export_data import DataExportDialog as Data
-import csv
+from ui.teensy_settings_dialog import TeensySettingsDialog
 import os
 import datetime
 import sys
-import time
 
 def format_force(value, axis):
     if axis == "X":
@@ -212,6 +211,15 @@ class MainWindow(QMainWindow):
         self.export_data_btn = QPushButton("Export Data")
         self.export_data_btn.clicked.connect(self.show_export_data_window)
 
+        self.teensy_settings_btn = QPushButton("Teensy Settings")
+        self.teensy_settings_btn.clicked.connect(self.show_teensy_settings)
+
+        self.saved_teensy_settings = {
+            "conv_mode": "Continuous",
+            "sps": "800",
+            "load_cells": [True]*6
+        }
+
         zero_grid = QGridLayout()
         zero_grid.addWidget(self.zero_lc_btn, 0, 0)
         zero_grid.addWidget(self.clear_zero_lc_btn, 0, 1)
@@ -219,6 +227,8 @@ class MainWindow(QMainWindow):
         zero_grid.addWidget(self.clear_zero_accel_btn, 0, 3)
         zero_grid.addWidget(self.plot_btn, 1, 1)
         zero_grid.addWidget(self.export_data_btn, 1, 2)
+        zero_grid.addWidget(self.teensy_settings_btn, 1, 3)
+
 
         legend = QLabel("Arrows indicate direction of applied force. X: ←→ , Y: ↑↓ , Z: ▼ (down) ▲ (up)")
         legend.setAlignment(Qt.AlignCenter)
@@ -308,6 +318,16 @@ class MainWindow(QMainWindow):
         #     writer.writerow(["Timestamp", "LC_SPS", "Accel_SPS"])
         
         self.sys_log_path = os.path.join(base_dir, "..", "Database", "sys_log.txt")
+
+    def show_teensy_settings(self):
+        dlg = TeensySettingsDialog(
+            parent=self, 
+            socket_thread=self.socket_thread, 
+            log_callback=self.log_message,
+            initial_settings=self.saved_teensy_settings
+        )
+        if dlg.exec_():
+            self.saved_teensy_settings = dlg.get_teensy_settings()
 
     def log_message(self, message):
         # Update UI console output

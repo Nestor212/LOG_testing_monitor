@@ -246,9 +246,7 @@ class PlotWindow(QWidget):
     def update_plot_timer_interval(self):
         smoothing_n = int(self.smoothing_selector.currentText().split()[0])
 
-        if smoothing_n <= 16:
-            interval = 250
-        elif smoothing_n <= 32:
+        if smoothing_n <= 32:
             interval = 500
         else:
             interval = 1000
@@ -303,7 +301,7 @@ class PlotWindow(QWidget):
             if not self.catch_up_mode:
                 print(f"⚠️ Lag: {lag_sec:.2f}s behind. Slowing refresh.")
                 self.catch_up_mode = True
-                self.live_timer.setInterval(2000)
+                self.live_timer.setInterval(1000)
         else:
             if self.catch_up_mode:
                 print("✅ Caught up. Restoring normal refresh.")

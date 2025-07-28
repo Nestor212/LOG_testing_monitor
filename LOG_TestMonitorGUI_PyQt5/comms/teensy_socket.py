@@ -300,6 +300,11 @@ class TeensySocketThread(QThread):
 
     def _parse_fields(self, line):
         fields = line[3:].strip().split()
+        #Check if message starts with Info:
+        if line.startswith("Info:"):
+            self.emitter.log_message.emit(f"Teensy {line}")
+            return None
+
         if len(fields) != 12:
             self.emitter.log_message.emit(f"⚠️ Malformed line: {line}")
             return None
@@ -438,7 +443,7 @@ class TeensySocketThread(QThread):
             accel_writer = csv.writer(accel_csv_file)
 
             batch = []
-            BATCH_SIZE = 100
+            BATCH_SIZE = 50
             BATCH_TIMEOUT = 0.2  # seconds
 
             last_batch_time = time.time()
@@ -612,10 +617,23 @@ class TeensySocketThread(QThread):
             cmd = f"SETTIME {unix_time}\n"
             self.s.sendall(cmd.encode('utf-8'))
 
+    def send_command(self, cmd_str):
+        try:
+            self.s.sendall((cmd_str + "\n").encode())
+        except Exception as e:
+            print(f"Error sending command: {e}")
+
+
     def stop(self):
         self.emitter.log_message.emit("🛑 Stopping socket thread.")
         self.running = False
         try:
+            try:
+                self.send_command("D")
+            except Exception as e:
+                self.emitter.log_message.emit(f"⚠️ Error sending disconnect command: {e}")
+            time.sleep(0.1)  # Give some time for the command to be sent
+
             if self.s:
                 self.s.shutdown(socket.SHUT_RDWR)
                 self.s.close()
