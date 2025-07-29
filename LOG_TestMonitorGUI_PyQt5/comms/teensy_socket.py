@@ -161,7 +161,11 @@ class TeensySocketThread(QThread):
                 time.sleep(0.1)  # Wait for data to accumulate
 
             avg_loads = np.mean(self.avg_load_buffer, axis=0).tolist()
-            avg_accels = np.mean(self.avg_accel_buffer, axis=0).tolist()
+            # Check if accel buffer is not empty
+            if not self.avg_accel_buffer:
+                avg_accels = [0.0, 0.0, 0.0]
+            else:
+                avg_accels = np.mean(self.avg_accel_buffer, axis=0).tolist()
 
             self.latest_data = (
                 timestamp_str,
@@ -367,7 +371,10 @@ class TeensySocketThread(QThread):
 
     def _process_loads(self, loads, timestamp):
         loads = [round(0.0 if math.isnan(x) else x, 4) for x in loads]
-        adjusted = [l - offset - zero for l, offset, zero in zip(loads, self.load_offsets, self.lc_zero_load_offset)]
+        adjusted = [
+            l - offset - zero if l != 0.0 else l
+            for l, offset, zero in zip(loads, self.load_offsets, self.lc_zero_load_offset)
+        ]
         # Replace NaN with 0.0 and round
         rounded = [round(0.0 if math.isnan(x) else x, 4) for x in adjusted]
         self.pre_trigger_buffer.append((timestamp, *rounded))
