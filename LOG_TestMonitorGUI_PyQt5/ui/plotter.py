@@ -297,7 +297,7 @@ class PlotWindow(QWidget):
         now = datetime.datetime.now()
         lag_sec = (now - latest_time).total_seconds()
 
-        if lag_sec > 1:
+        if lag_sec > 1.5:
             if not self.catch_up_mode:
                 print(f"⚠️ Lag: {lag_sec:.2f}s behind. Slowing refresh.")
                 self.catch_up_mode = True
@@ -567,8 +567,8 @@ class PlotWindow(QWidget):
         mode_number = 1 if self.plot_mode_selector.currentText() == "Single Plot" else 2
         self.rebuild_plot_layout(plot_data, mode_number)
 
-        start_dt = self.start_time_edit.dateTime().toPyDateTime()
-        end_dt = self.end_time_edit.dateTime().toPyDateTime()
+        start_dt = self.start_time_edit.dateTime().toPyDateTime().replace(microsecond=0)
+        end_dt = self.end_time_edit.dateTime().toPyDateTime().replace(microsecond=0)
         avg_n = int(self.averaging_selector.currentText().split()[0])
         self.appending_live_data = False  # Disable appending for historical plots
         self.worker.query_range(start_dt, end_dt, avg_n)

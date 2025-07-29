@@ -7,5 +7,6 @@ class ParserEmitter(QObject):
     trigger_started = pyqtSignal(datetime.datetime)
     disconnected = pyqtSignal(bool)
     log_message = pyqtSignal(str)
+    teensy_reset = pyqtSignal()
 
 

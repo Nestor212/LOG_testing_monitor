@@ -43,6 +43,7 @@ class MainWindow(QMainWindow):
         self.signal_emitter.update_sps.connect(self.update_sps_display)
         self.signal_emitter.disconnected.connect(self.handle_disconnection)
         self.signal_emitter.log_message.connect(self.log_message)
+        self.signal_emitter.teensy_reset.connect(self.teensy_resend_settings)
 
         # Fonts
         font = QFont("Arial", 16, QFont.Bold)
@@ -188,10 +189,10 @@ class MainWindow(QMainWindow):
         conn_layout.addWidget(QLabel("Status:"))
         conn_layout.addWidget(self.status_led)
         # conn_layout.addWidget(self.load_offsets_checkbox)
-        conn_layout.addWidget(self.trigger_checkbox)
-        conn_layout.addWidget(self.trigger_selector)
-        conn_layout.addWidget(self.trigger_label)
-        conn_layout.addWidget(self.trigger_input)
+        # conn_layout.addWidget(self.trigger_checkbox)
+        # conn_layout.addWidget(self.trigger_selector)
+        # conn_layout.addWidget(self.trigger_label)
+        # conn_layout.addWidget(self.trigger_input)
         conn_layout.addStretch(1)
         conn_layout.addWidget(self.clock_label)
 
@@ -318,6 +319,15 @@ class MainWindow(QMainWindow):
         #     writer.writerow(["Timestamp", "LC_SPS", "Accel_SPS"])
         
         self.sys_log_path = os.path.join(base_dir, "..", "Database", "sys_log.txt")
+
+    def teensy_resend_settings(self):
+        if self.socket_thread:
+            settings = self.saved_teensy_settings
+            command = f"SET {0 if settings['conv_mode'] == 'Single-Shot' else 1} {settings['sps']} " + " ".join(map(str, map(int, settings['load_cells'])))
+            self.socket_thread.send_command(command)
+            self.log_message(f"Resent Teensy settings: {command}")
+        else:
+            self.log_message("⚠️ No socket thread available to resend settings.")
 
     def show_teensy_settings(self):
         dlg = TeensySettingsDialog(

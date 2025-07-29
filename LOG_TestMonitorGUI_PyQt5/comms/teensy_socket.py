@@ -224,8 +224,13 @@ class TeensySocketThread(QThread):
         self.emitter.disconnected.emit(True)
 
         while self.running:
+            if (time.time() - self.last_read_time > 3) | self.timeout_counter >= 3:
+                self.timeout_counter = 0
+                self.emitter.log_message.emit("Watchdog timeout: No data received in 3s. Forcing reconnect.")
+                break
+
             try:
-                chunk = self.s.recv(2048).decode(errors='ignore')
+                chunk = self.s.recv(4096).decode(errors='ignore')
 
                 if not chunk:
                     raise ConnectionResetError("Socket closed by peer.")
@@ -249,11 +254,6 @@ class TeensySocketThread(QThread):
                 self.emitter.log_message.emit(f"Connection interrupted: {e}")
                 break  # Exit to reconnect
 
-            # Watchdog check happens **outside exceptions** for normal flow too
-            if (time.time() - self.last_read_time > 2) | self.timeout_counter >= 5:
-                self.timeout_counter = 0
-                self.emitter.log_message.emit("Watchdog timeout: No data received in 2s. Forcing reconnect.")
-                break
 
     def _cleanup_socket(self):
         try:
@@ -309,8 +309,14 @@ class TeensySocketThread(QThread):
             self.emitter.log_message.emit(f"Teensy {line}")
             return None
 
+        if line.startswith("RESET"):
+            #if teensy has reset, resend teensy settings
+            self.emitter.log_message.emit("Teensy reset detected. Resending settings.")
+            self.emitter.teensy_reset.emit()
+            return None
+        
         if len(fields) != 12:
-            self.emitter.log_message.emit(f"⚠️ Malformed line: {line}")
+            # self.emitter.log_message.emit(f"⚠️ Malformed line: {line}")
             return None
 
         raw_ts = float(fields[0])
